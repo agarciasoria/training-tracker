@@ -30,15 +30,23 @@
       min-height: 100vh;
     }
 
+    /* MODIFIED: Header styles for auth */
     header {
       background: var(--card-bg);
       display: flex;
-      justify-content: space-around;
+      justify-content: space-between; /* Changed from space-around */
       align-items: center;
-      padding: 10px 0;
+      padding: 10px 20px; /* Added horizontal padding */
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-wrap: wrap; /* Allow wrapping on small screens */
+    }
+    
+    header div {
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
 
     header button {
@@ -51,6 +59,19 @@
     }
     header button:hover {
       color: var(--accent);
+    }
+    
+    #authContainer button {
+        background: var(--accent);
+        border-radius: 6px;
+        color: white;
+    }
+    
+    #logoutBtn {
+        background: #555;
+    }
+    #userInfo {
+        margin-right: 10px;
     }
 
     main {
@@ -90,11 +111,10 @@
       color: var(--text);
     }
     
-    /* Fix: Aligns the checkbox and text to the right */
     .checkbox-label {
       display: flex;
       align-items: center;
-      justify-content: flex-end; /* This pushes the content to the right */
+      justify-content: flex-end;
       gap: 8px;
       cursor: pointer;
       margin-top: 5px;
@@ -172,7 +192,6 @@
       margin-top: 5px;
     }
 
-    /* Modal styles */
     #modalOverlay {
       position: fixed;
       inset: 0;
@@ -234,7 +253,7 @@
     @media (max-width: 600px) {
       header {
         flex-direction: column;
-        gap: 6px;
+        gap: 10px;
       }
 
       form {
@@ -248,15 +267,23 @@
   </style>
 </head>
 <body>
+  <!-- ==================== NEW HEADER STRUCTURE ==================== -->
   <header>
-    <button onclick="showSection('cycles')">🏁 Cycles</button>
-    <button onclick="showSection('workouts')">💪 Workouts</button>
-    <button onclick="showSection('dayEntries')">📅 Day Entries</button>
+    <div>
+        <button onclick="showSection('cycles')">🏁 Cycles</button>
+        <button onclick="showSection('workouts')">💪 Workouts</button>
+        <button onclick="showSection('dayEntries')">📅 Day Entries</button>
+    </div>
+    <div id="authContainer">
+        <button id="loginBtn">Sign in with Google</button>
+        <span id="userInfo" style="display: none;"></span>
+        <button id="logoutBtn" style="display: none;">Logout</button>
+    </div>
   </header>
 
   <main id="mainContent"></main>
 
-  <!-- Popup Modal -->
+  <!-- Popup Modal (No changes here) -->
   <div id="modalOverlay">
     <div id="modal">
       <h3 id="modalTitle"></h3>
@@ -268,9 +295,33 @@
     </div>
   </div>
 
+  <!-- ==================== NEW FIREBASE SCRIPTS ==================== -->
+  <!-- Firebase SDKs (Software Development Kits) -->
+  <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore-compat.js"></script>
+  
+  <!-- Your Firebase Project Configuration -->
+  <script>
+    // IMPORTANT: This object contains your project's unique keys.
+    const firebaseConfig = {
+      apiKey: "AIzaSyDcoaseryHd0SWKA004_vTICjdjDxh9HBE",
+      authDomain: "training-tracker-athletics.firebaseapp.com",
+      projectId: "training-tracker-athletics",
+      storageBucket: "training-tracker-athletics.firebaseapp.com",
+      messagingSenderId: "752017697603",
+      appId: "1:752017697603:web:535ec4ba62fe3b4e605df6"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+  </script>
+  
+  <!-- =============================================================== -->
+
   <script src="app.js"></script>
   <script>
-    // --- Popup modal helpers ---
+    // --- Popup modal helpers (No changes here) ---
     function openModal(title, contentHTML, confirmText = "Save", onConfirm) {
       const overlay = document.getElementById("modalOverlay");
       document.getElementById("modalTitle").textContent = title;
@@ -297,7 +348,6 @@
   </script>
 </body>
 </html>
-
 
 
 

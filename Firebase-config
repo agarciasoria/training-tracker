@@ -1,0 +1,17 @@
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDcoaseryHd0SWKA004_vTIcjdjDxh9HBE",
+  authDomain: "training-tracker-athletics.firebaseapp.com",
+  projectId: "training-tracker-athletics",
+  storageBucket: "training-tracker-athletics.firebasestorage.app",
+  messagingSenderId: "752017697603",
+  appId: "1:752017697603:web:535ec4ba62fe3b4e605df6"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
