@@ -2,7 +2,8 @@
 const auth = firebase.auth();
 const db = firebase.firestore();
 let currentUser = null;
-let listeners = []; // To store our real-time listeners for easy cleanup
+let listeners = [];
+let currentView = 'cycles'; // BUG FIX: Track the current active view
 
 // This will hold our local data, synced from Firestore in real-time
 let data = {
@@ -17,12 +18,10 @@ const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const userInfo = document.getElementById('userInfo');
 const mainContent = document.getElementById('mainContent');
-// Get the container for the main navigation buttons
 const headerButtons = document.querySelector('header div:first-child'); 
 
 loginBtn.onclick = () => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
 logoutBtn.onclick = () => {
-    // Before signing out, it's crucial to detach all Firestore listeners
     listeners.forEach(unsubscribe => unsubscribe());
     listeners = [];
     auth.signOut();
@@ -30,7 +29,6 @@ logoutBtn.onclick = () => {
 
 auth.onAuthStateChanged(user => {
   if (user) {
-    // User is signed in
     currentUser = user;
     loginBtn.style.display = 'none';
     logoutBtn.style.display = 'inline-block';
@@ -38,15 +36,13 @@ auth.onAuthStateChanged(user => {
     userInfo.textContent = `Hi, ${user.displayName.split(' ')[0]}`;
     userInfo.style.display = 'inline-block';
     
-    // FIREBASE: Enable offline persistence. This is the magic for offline support!
     db.enablePersistence().catch(err => console.error("Firestore persistence error: ", err));
     
-    loadUserData(); // Load this user's specific data from Firestore
-    showSection('cycles');
+    loadUserData();
+    showSection(currentView);
   } else {
-    // User is signed out
     currentUser = null;
-    data = { cycles: [], workouts: [], dayEntries: [], seriesSets: [] }; // Clear local data
+    data = { cycles: [], workouts: [], dayEntries: [], seriesSets: [] };
     mainContent.innerHTML = '<h2>Welcome! Please sign in to track your training.</h2>';
     loginBtn.style.display = 'inline-block';
     logoutBtn.style.display = 'none';
@@ -60,7 +56,6 @@ function loadUserData() {
   if (!currentUser) return;
   const uid = currentUser.uid;
 
-  // Detach any existing listeners to prevent memory leaks on re-login
   listeners.forEach(unsubscribe => unsubscribe());
   listeners = [];
 
@@ -68,19 +63,12 @@ function loadUserData() {
 
   collections.forEach(collectionName => {
     const unsubscribe = db.collection(`users/${uid}/${collectionName}`).onSnapshot(snapshot => {
-      // When data changes in Firestore, this code runs automatically
       data[collectionName] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      // Re-render the current view to show the new data
-      const h2 = mainContent.querySelector('h2');
-      if (h2) {
-        const currentSection = h2.textContent.toLowerCase().includes('cycle') ? 'cycles' :
-                               h2.textContent.toLowerCase().includes('workout') ? 'workouts' :
-                               h2.textContent.toLowerCase().includes('day') ? 'dayEntries' : null;
-        if(currentSection) showSection(currentSection.replace(/s$/, ''));
-      }
+      // BUG FIX: Intelligently re-render the current view when data changes.
+      showSection(currentView);
     });
-    listeners.push(unsubscribe); // Store the listener function so we can call it to detach
+    listeners.push(unsubscribe);
   });
 }
 
@@ -108,15 +96,126 @@ function formatRecoveryForDisplay(sec) {
 }
 
 
-// ===== Section Rendering (no major changes) =====
+// ===== Section Rendering =====
 function showSection(section) {
-  if (!currentUser) return; // Don't show anything if not logged in
+  if (!currentUser) return;
+  currentView = section; // BUG FIX: Set the current view
   const main = document.getElementById("mainContent");
   if (section === "cycles") renderCycles(main);
   if (section === "workouts") renderWorkouts(main);
   if (section === "dayEntries") renderDayEntries(main);
+  if (section === "summary") renderSummary(main); // NEW FEATURE
 }
 
+// ===== NEW FEATURE: Summary Page =====
+function renderSummary(main) {
+    main.innerHTML = `
+      <h2>Summary</h2>
+      <div id="summaryFilters">
+        <select id="cycleFilter"><option value="">All Cycles</option></select>
+        <select id="workoutFilter"><option value="">All Workouts</option></select>
+        <input type="date" id="dateFilter">
+        <select id="typeFilter">
+          <option value="">All Types</option>
+          <option value="track">Track</option>
+          <option value="gym">Gym</option>
+        </select>
+        <button id="clearFiltersBtn">Clear</button>
+      </div>
+      <div id="summaryList"></div>
+    `;
+
+    const cycleFilter = document.getElementById('cycleFilter');
+    const workoutFilter = document.getElementById('workoutFilter');
+    const dateFilter = document.getElementById('dateFilter');
+    const typeFilter = document.getElementById('typeFilter');
+    const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+
+    // Populate cycle dropdown
+    const sortedCycles = data.cycles.sort((a,b) => b.start_date.localeCompare(a.start_date));
+    cycleFilter.innerHTML += sortedCycles.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+    function updateWorkoutOptions() {
+        const selectedCycleId = cycleFilter.value;
+        let availableWorkouts = data.workouts;
+        if (selectedCycleId) {
+            availableWorkouts = data.workouts.filter(w => w.cycle_id === selectedCycleId);
+        }
+        workoutFilter.innerHTML = '<option value="">All Workouts</option>' + 
+            availableWorkouts.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+    }
+    
+    cycleFilter.addEventListener('change', () => {
+        updateWorkoutOptions();
+        updateSummaryList();
+    });
+    
+    workoutFilter.addEventListener('change', updateSummaryList);
+    dateFilter.addEventListener('change', updateSummaryList);
+    typeFilter.addEventListener('change', updateSummaryList);
+
+    clearFiltersBtn.addEventListener('click', () => {
+        cycleFilter.value = '';
+        dateFilter.value = '';
+        typeFilter.value = '';
+        updateWorkoutOptions();
+        workoutFilter.value = '';
+        updateSummaryList();
+    });
+
+    updateWorkoutOptions();
+    updateSummaryList();
+}
+
+function updateSummaryList() {
+    const list = document.getElementById("summaryList");
+    if (!list) return;
+
+    const selectedCycle = document.getElementById('cycleFilter').value;
+    const selectedWorkout = document.getElementById('workoutFilter').value;
+    const selectedDate = document.getElementById('dateFilter').value;
+    const selectedType = document.getElementById('typeFilter').value;
+
+    let filteredEntries = [...data.dayEntries];
+
+    // Apply filters
+    if (selectedDate) {
+        filteredEntries = filteredEntries.filter(d => d.date === selectedDate);
+    }
+
+    if (selectedWorkout) {
+        filteredEntries = filteredEntries.filter(d => d.workout_id === selectedWorkout);
+    } else if (selectedCycle) {
+        const workoutIdsInCycle = data.workouts.filter(w => w.cycle_id === selectedCycle).map(w => w.id);
+        filteredEntries = filteredEntries.filter(d => workoutIdsInCycle.includes(d.workout_id));
+    }
+    
+    if (selectedType) {
+        filteredEntries = filteredEntries.filter(d => {
+            const workout = data.workouts.find(w => w.id === d.workout_id);
+            return workout && workout.type === selectedType;
+        });
+    }
+
+    const sortedEntries = filteredEntries.sort((a, b) => b.date.localeCompare(a.date));
+
+    list.innerHTML = sortedEntries.map(d => {
+      const w = data.workouts.find(w => w.id === d.workout_id);
+      const s = data.seriesSets.filter(s => s.day_entry_id === d.id).sort((a,b) => a.index - b.index);
+
+      let seriesContent = s.map(ss => {
+          if (ss.type === 'track') return `${ss.run_time}s` + (ss.is_last ? " (last)" : ` [rec: ${formatRecoveryForDisplay(ss.recovery_seconds)}]`);
+          return `${ss.reps} @ ${ss.weight}`;
+      }).join("<br>");
+
+      return `
+        <div class="card">
+          <b>${w?.name || "Unknown"}</b> (${w?.type || 'N/A'}) — <b>${d.date}</b><br>
+          <p>${seriesContent}</p>
+          ${d.notes ? `<i>${d.notes}</i><br>` : ''}
+        </div>`;
+    }).join("") || "<p>No entries match the selected filters.</p>";
+}
 
 // ===== Cycles (Refactored for Firebase) =====
 function renderCycles(main) {
@@ -140,7 +239,6 @@ function renderCycles(main) {
       start_date: f.start.value,
       end_date: f.end.value
     };
-    // FIREBASE: Add a new document to the 'cycles' subcollection
     db.collection(`users/${currentUser.uid}/cycles`).add(newCycle);
     f.reset();
   };
@@ -176,7 +274,6 @@ window.editCycle = function(id) {
       start_date: document.getElementById("editStart").value,
       end_date: document.getElementById("editEnd").value
     };
-    // FIREBASE: Update an existing document
     db.doc(`users/${currentUser.uid}/cycles/${id}`).update(updatedCycle);
   });
 };
@@ -184,9 +281,8 @@ window.editCycle = function(id) {
 window.deleteCycle = function(id) {
     openDeleteConfirm("Delete this cycle and ALL related data (workouts, entries)?", async () => {
         const uid = currentUser.uid;
-        const batch = db.batch(); // Use a batch for atomic deletes
+        const batch = db.batch();
 
-        // Find and delete related workouts and their children
         const workoutsSnapshot = await db.collection(`users/${uid}/workouts`).where('cycle_id', '==', id).get();
         for (const workoutDoc of workoutsSnapshot.docs) {
             const dayEntriesSnapshot = await db.collection(`users/${uid}/dayEntries`).where('workout_id', '==', workoutDoc.id).get();
@@ -355,13 +451,13 @@ function renderDayEntries(main) {
         const reps = card.querySelector('[name=reps]').value; if (!reps) return;
         seriesData.reps = reps; seriesData.weight = card.querySelector('[name=weight]').value;
       }
-      const newSeriesRef = db.collection(`users/${uid}/seriesSets`).doc(); // create a ref with a new ID
+      const newSeriesRef = db.collection(`users/${uid}/seriesSets`).doc();
       batch.set(newSeriesRef, seriesData);
     });
     
     await batch.commit();
-    document.getElementById("dayForm").reset(); // Reset form on success
-    seriesContainer.innerHTML = "";
+    document.getElementById("dayForm").reset();
+    document.getElementById("seriesContainer").innerHTML = "";
     seriesCount = 0;
   };
 
@@ -423,15 +519,12 @@ window.editDayEntry = function(id) {
     const uid = currentUser.uid;
     const batch = db.batch();
 
-    // 1. Update the day entry
     const updatedEntry = { date: document.getElementById("editDate").value, notes: document.getElementById("editNotes").value };
     batch.update(db.doc(`users/${uid}/dayEntries/${d.id}`), updatedEntry);
 
-    // 2. Delete all old seriesSets for this day entry
     const oldSeriesSnapshot = await db.collection(`users/${uid}/seriesSets`).where('day_entry_id', '==', d.id).get();
     oldSeriesSnapshot.forEach(doc => batch.delete(doc.ref));
     
-    // 3. Create new seriesSets from the modal
     document.querySelectorAll("#editSeriesContainer .seriesCard").forEach((card, i) => {
         let seriesData = { day_entry_id: d.id, index: i + 1, type: card.dataset.type };
         if (seriesData.type === 'track') {
@@ -461,11 +554,9 @@ window.deleteDayEntry = function(id) {
     const uid = currentUser.uid;
     const batch = db.batch();
     
-    // Delete the series sets
     const seriesSnapshot = await db.collection(`users/${uid}/seriesSets`).where('day_entry_id', '==', id).get();
     seriesSnapshot.forEach(doc => batch.delete(doc.ref));
     
-    // Delete the day entry itself
     batch.delete(db.doc(`users/${uid}/dayEntries/${id}`));
     
     await batch.commit();
