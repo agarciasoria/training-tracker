@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Track & Field Training Tracker</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card-bg: #1a1d25;
+      --accent: #4caf50;
+      --text: #f1f1f1;
+      --muted: #bbb;
+      --danger: #ff5252;
+      --warning: #ffb300;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--card-bg);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 10px 0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    header button {
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 1rem;
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+    header button:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 20px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    h2 {
+      margin-top: 0;
+      color: var(--accent);
+    }
+
+    form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+      background: var(--card-bg);
+      padding: 10px;
+      border-radius: 10px;
+    }
+
+    input, select, textarea, button {
+      border-radius: 6px;
+      border: none;
+      padding: 8px;
+      font-size: 0.95rem;
+    }
+
+    input, select, textarea {
+      flex: 1 1 120px;
+      background: #2a2d35;
+      color: var(--text);
+    }
+    
+    /* Fix: Aligns the checkbox and text to the right */
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end; /* This pushes the content to the right */
+      gap: 8px;
+      cursor: pointer;
+      margin-top: 5px;
+      width: 100%;
+    }
+    .checkbox-label input[type="checkbox"] {
+      flex: 0 0 auto;
+      width: auto;
+    }
+
+    textarea {
+      min-height: 50px;
+    }
+
+    button[type="submit"],
+    #addSeries {
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    button[type="submit"]:hover,
+    #addSeries:hover {
+      opacity: 0.85;
+    }
+
+    #cycleList, #workoutList, #dayList {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      padding: 12px 14px;
+      border-radius: 10px;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+      position: relative;
+    }
+    
+    .card .warning-text {
+        color: var(--warning);
+        font-size: 0.85em;
+        font-style: italic;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #444;
+    }
+
+    .card button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-right: 6px;
+    }
+
+    .card button:hover {
+      color: var(--accent);
+    }
+
+    .card .deleteSeries {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      color: var(--danger);
+      font-weight: bold;
+      font-size: 1.1rem;
+    }
+
+    .seriesCard {
+      background: #23262e;
+      margin-top: 5px;
+    }
+
+    /* Modal styles */
+    #modalOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+    }
+    #modal {
+      background: var(--card-bg);
+      padding: 20px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      color: var(--text);
+      max-height: 85vh;
+    }
+    #modal h3 {
+      margin: 0 0 5px 0;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    #modalBody {
+      overflow-y: auto;
+      flex-grow: 1;
+      padding-right: 10px;
+      margin-right: -10px;
+    }
+    #modal input, #modal select, #modal textarea {
+      width: 100%;
+    }
+    #modalButtons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    #modalButtons button {
+      flex: 1;
+    }
+    .btn-cancel {
+      background: #444;
+      color: var(--text);
+    }
+    .btn-save {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-delete {
+      background: var(--danger);
+      color: white;
+    }
+
+    @media (max-width: 600px) {
+      header {
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      form {
+        flex-direction: column;
+      }
+
+      button, input, select, textarea {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <button onclick="showSection('cycles')">🏁 Cycles</button>
+    <button onclick="showSection('workouts')">💪 Workouts</button>
+    <button onclick="showSection('dayEntries')">📅 Day Entries</button>
+  </header>
+
+  <main id="mainContent"></main>
+
+  <!-- Popup Modal -->
+  <div id="modalOverlay">
+    <div id="modal">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <div id="modalButtons">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button id="modalConfirm" class="btn-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    // --- Popup modal helpers ---
+    function openModal(title, contentHTML, confirmText = "Save", onConfirm) {
+      const overlay = document.getElementById("modalOverlay");
+      document.getElementById("modalTitle").textContent = title;
+      const body = document.getElementById("modalBody");
+      body.innerHTML = contentHTML;
+      const confirmBtn = document.getElementById("modalConfirm");
+      confirmBtn.textContent = confirmText;
+      confirmBtn.onclick = () => {
+        onConfirm();
+        closeModal();
+      };
+      overlay.style.display = "flex";
+    }
+
+    function openDeleteConfirm(message, onConfirm) {
+      openModal("Confirm Delete", `<p>${message}</p>`, "Delete", () => onConfirm());
+      document.getElementById("modalConfirm").className = "btn-delete";
+    }
+
+    function closeModal() {
+      document.getElementById("modalOverlay").style.display = "none";
+      document.getElementById("modalConfirm").className = "btn-save";
+    }
+  </script>
+</body>
+</html>
+
+
+
+

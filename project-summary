@@ -1,0 +1,127 @@
+PROJECT BRIEF: Track & Field Training Tracker
+=============================================
+
+PROJECT TYPE: Web-based personal training tracker (GitHub Pages deployment)
+
+TARGET USERS: Track and field athletes who train in monthly cycles and want to track progress over time. Multi-user capable (shareable URL, each user uses own Google account).
+
+CORE CONCEPT:
+- Athletes train in monthly cycles where they repeat the same exercises/workouts
+- Need to log multiple day entries for each workout type within a cycle
+- Each day entry contains individual series/reps with specific times/weights
+- Compare performance of the same workout across different days and cycles
+
+ARCHITECTURE:
+
+1. TWO MAIN SECTIONS:
+   - Gym Sessions
+   - Track Sessions
+
+2. HIERARCHY STRUCTURE:
+   Training Cycle → Workout Entries → Day Entries → Individual Series/Reps
+   
+   TRACK Example:
+   "January 2024 Cycle" 
+      → Workout Entry: "5x150m"
+         → Day Entry 1 (Jan 11): 
+            - Series 1: 16'57, recovery: 8'
+            - Series 2: 16'08, recovery: 8'
+            - Series 3: 16'81, recovery: 8'
+            - Series 4: 16'93, recovery: 8'
+            - Series 5: 17'02
+            - Notes: "Tough session, wind against except 2nd rep"
+         → Day Entry 2 (Jan 18): 
+            - Series 1: 16'45, recovery: 8'
+            - Series 2: 16'12, recovery: 8'
+            - [only 4 reps this time]
+            - Notes: "Better conditions"
+      
+      → Workout Entry: "3x4x100m"
+         → Day Entry 1 (Jan 9):
+            - Block 1: 10'96-11'05-11'06-11'7, recovery: 2' between reps, 8' after block
+            - Block 2: 11'35-11'02-11'75-11'3, recovery: 2' between reps, 8' after block
+            - Block 3: 11'90-11'5-11'99-11'65
+            - Notes: "Windy day, tough after first block"
+   
+   GYM Example:
+   "February 2024 Cycle"
+      → Workout Entry: "Cargada (CC)"
+         → Day Entry 1 (Feb 7):
+            - Set 1: 6 reps @ 90kg
+            - Set 2: 4 reps @ 95kg (x2 rounds)
+            - Notes: "Felt strong"
+         → Day Entry 2 (Feb 10):
+            - Set 1: 4 reps @ 95kg
+            - Set 2: 2 reps @ 100kg
+            - Set 3: 4 reps @ 95kg
+            - Notes: "Good progress on 100kg"
+
+3. CYCLE MANAGEMENT:
+   - Create cycles with custom names and date ranges
+   - Define which workout entries (workout types) belong to each cycle
+   - Rename/modify cycles → all associated data auto-updates
+   - Filter/navigate by cycle
+
+4. WORKOUT ENTRY LOGIC:
+   - Each cycle contains multiple "Workout Entries" (workout formats)
+   - TRACK workout formats: "5x150m", "3x4x100m", "200-200,150-150,100-100", "3x2x300m"
+   - GYM workout formats: Exercise name (e.g., "Cargada", "Squats", "Bench Press")
+   - Same workout entry can appear in multiple cycles for comparison
+
+5. DAY ENTRY LOGGING:
+   
+   TRACK SESSIONS:
+   - Select cycle → Select workout entry → Add new day entry
+   - Define number of series/blocks
+   - For each series: Input time and recovery time
+   - Add overall notes (conditions, feelings, etc.)
+   - Flexible series count (5x150m one day, 4x150m another day, same workout entry)
+   
+   GYM SESSIONS:
+   - Select cycle → Select workout entry (exercise) → Add new day entry
+   - Define sets with: reps × weight (e.g., "6x90kg")
+   - Multiple sets per day entry
+   - Add overall notes
+   - Track progression: sets, reps, and weights over time
+
+6. DATA STORAGE:
+   - Google Sheets integration
+   - Per-user authentication (Google account)
+   - Each user saves to their own Google Sheet
+   - Data accessible from any device
+   
+   SUGGESTED SHEET STRUCTURE:
+   - Sheet 1: Cycles (ID, Name, Start Date, End Date)
+   - Sheet 2: Workout Entries (ID, Cycle ID, Section, Workout Format/Exercise Name)
+   - Sheet 3: Day Entries (ID, Workout Entry ID, Date, Notes)
+   - Sheet 4: Track Series Data (Day Entry ID, Series Number, Time, Recovery)
+   - Sheet 5: Gym Set Data (Day Entry ID, Set Number, Reps, Weight)
+
+7. VISUALIZATION & COMPARISON:
+   - View all day entries for a specific workout entry
+   - Charts showing time improvements (track) or weight progression (gym)
+   - Compare same workout across different days within a cycle
+   - Compare same workout across different cycles
+   - Display individual series/reps data per day
+   - Average times per session, best times, progression trends
+   
+   Examples:
+   - "5x150m progression: Jan 11 (avg 16'88) vs Jan 18 (avg 16'32) vs Feb 8 (avg 16'15)"
+   - "Cargada weight progression: Feb 7 (6x90kg) → Feb 10 (2x100kg) → Feb 24 (3x2x105kg)"
+
+8. KEY FEATURES:
+   - Flexible series/rep counts per day (not rigid structure)
+   - Individual time/weight tracking per series/set
+   - Rich note-taking per day entry
+   - Easy navigation: Cycle → Workout → All days for that workout
+   - Quick comparison view of same workout across time
+
+KEY TECHNICAL REQUIREMENTS:
+- Static web app compatible with GitHub Pages
+- Google Sheets API integration with OAuth
+- Multi-user support (shareable URL, independent user data)
+- Responsive design for mobile/desktop access
+- Dynamic form generation (add/remove series or sets as needed)
+- Data visualization library (Chart.js or similar)
+
+CURRENT STATUS: Planning/Design Phase
