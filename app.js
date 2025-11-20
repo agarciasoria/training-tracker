@@ -104,9 +104,133 @@ function showSection(section) {
   if (section === "cycles") renderCycles(main);
   if (section === "workouts") renderWorkouts(main);
   if (section === "dayEntries") renderDayEntries(main);
-  if (section === "summary") renderSummary(main); // NEW FEATURE
+  if (section === "summary") renderSummary(main);
+  if (section === "stats") renderStats(main);
 }
 window.showSection = showSection; // BUG FIX: Expose showSection to window
+
+// ===== NEW FEATURE: Stats Page (Chart.js) =====
+let myChart = null;
+
+function renderStats(main) {
+    // 1. Find all unique distances recorded in Track series
+    const distances = new Set();
+    // Check for missing legacy data
+    const missingDistCount = data.seriesSets.filter(s => s.type === 'track' && !s.distance_meters).length;
+    
+    data.seriesSets.forEach(s => {
+        if (s.type === 'track' && s.distance_meters) {
+            distances.add(s.distance_meters);
+        }
+    });
+    
+    const sortedDistances = Array.from(distances).sort((a, b) => a - b);
+    
+    let warningHTML = '';
+    if (missingDistCount > 0) {
+        warningHTML = `<div style="background: #332b00; border: 1px solid #ffb300; padding: 10px; border-radius: 6px; margin-bottom: 10px; color: #ffe082;">
+            ⚠️ <b>Legacy Data:</b> You have ${missingDistCount} track runs without a specified distance. 
+            Go to 'Day Entries' and Edit them (look for the <span style="color:#ffb300">[⚠️ Set Dist]</span> tag) to see them here.
+        </div>`;
+    }
+
+    main.innerHTML = `
+        <h2>Progress Analytics</h2>
+        ${warningHTML}
+        <div id="statsControls">
+            <select id="distanceSelect">
+                <option value="">Select a Distance...</option>
+            </select>
+        </div>
+        <div id="chartContainer">
+            <canvas id="progressChart"></canvas>
+        </div>
+    `;
+
+    const distanceSelect = document.getElementById('distanceSelect');
+    
+    if (sortedDistances.length === 0) {
+        distanceSelect.innerHTML = '<option>No track distances recorded yet.</option>';
+        distanceSelect.disabled = true;
+    } else {
+        distanceSelect.innerHTML = '<option value="">Select a Distance...</option>' + 
+            sortedDistances.map(d => `<option value="${d}">${d}m</option>`).join('');
+    }
+
+    const ctx = document.getElementById('progressChart').getContext('2d');
+
+    distanceSelect.addEventListener('change', (e) => {
+        const dist = parseFloat(e.target.value);
+        if (!dist) return;
+        updateChart(ctx, dist);
+    });
+}
+
+function updateChart(ctx, distance) {
+    // 2. Filter data for this distance
+    const points = [];
+    
+    data.dayEntries.forEach(entry => {
+        const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id && s.distance_meters === distance);
+        sets.forEach(s => {
+            // Find workout name
+            const workout = data.workouts.find(w => w.id === entry.workout_id);
+            points.push({
+                x: entry.date,
+                y: s.run_time,
+                workoutName: workout ? workout.name : 'Unknown',
+                recovery: formatRecoveryForDisplay(s.recovery_seconds)
+            });
+        });
+    });
+
+    // Sort by date
+    points.sort((a, b) => new Date(a.x) - new Date(b.x));
+
+    if (myChart) myChart.destroy();
+
+    myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: points.map(p => p.x),
+            datasets: [{
+                label: `${distance}m Performance (Seconds)`,
+                data: points.map(p => p.y),
+                borderColor: '#4caf50',
+                backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                borderWidth: 2,
+                pointRadius: 4,
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { 
+                    ticks: { color: '#bbb' }, 
+                    grid: { color: '#333' } 
+                },
+                y: { 
+                    ticks: { color: '#bbb' }, 
+                    grid: { color: '#333' },
+                    title: { display: true, text: 'Time (s)', color: '#bbb' }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#fff' } },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const p = points[context.dataIndex];
+                            return [`Workout: ${p.workoutName}`, `Recovery: ${p.recovery}`];
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
 
 // ===== NEW FEATURE: Summary Page =====
 function renderSummary(main) {
@@ -205,7 +329,11 @@ function updateSummaryList() {
       const s = data.seriesSets.filter(s => s.day_entry_id === d.id).sort((a,b) => a.index - b.index);
 
       let seriesContent = s.map(ss => {
-          if (ss.type === 'track') return `${ss.run_time}s` + (ss.is_last ? " (last)" : ` [rec: ${formatRecoveryForDisplay(ss.recovery_seconds)}]`);
+          if (ss.type === 'track') {
+              // NEW: Show Distance if available
+              const dist = ss.distance_meters ? `<b>${ss.distance_meters}m</b> in ` : '';
+              return `${dist}${ss.run_time}s` + (ss.is_last ? " (last)" : ` [rec: ${formatRecoveryForDisplay(ss.recovery_seconds)}]`);
+          }
           return `${ss.reps} @ ${ss.weight}`;
       }).join("<br>");
 
@@ -389,7 +517,6 @@ function renderDayEntries(main) {
     return;
   }
   
-  // NEW: Render two selects. Logic is handled by listeners below.
   main.innerHTML = `
     <h2>Day Entries</h2>
     <form id="dayForm">
@@ -427,7 +554,7 @@ function renderDayEntries(main) {
       const cycleId = cycleSelect.value;
       seriesContainer.innerHTML = "";
       seriesCount = 0;
-      entryActions.style.display = "none"; // Hide buttons if cycle changes
+      entryActions.style.display = "none"; 
       
       if (!cycleId) {
           workoutSelect.innerHTML = '<option value="">2. Select Cycle First...</option>';
@@ -452,7 +579,7 @@ function renderDayEntries(main) {
       seriesContainer.innerHTML = "";
       seriesCount = 0;
       if (workoutSelect.value) {
-          entryActions.style.display = "flex"; // Show buttons only when workout selected
+          entryActions.style.display = "flex";
       } else {
           entryActions.style.display = "none";
       }
@@ -469,10 +596,23 @@ function renderDayEntries(main) {
       const type = getWorkoutType();
       let content = '';
 
+      // UPDATED: Track series now asks for Distance (m)
       if (type === 'track') {
-          content = `<h4>Series ${seriesCount} (Track)</h4><input name="time" placeholder="Running time (e.g. 16.35)" required><input name="recovery" placeholder="Recovery (e.g. 3:30)"><label class="checkbox-label"><span>Last set</span><input type="checkbox" name="last"></label>`;
+          content = `
+            <h4>Series ${seriesCount} (Track)</h4>
+            <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                <input name="distance" type="number" placeholder="Distance (m)" style="flex:1;">
+                <input name="time" placeholder="Time (e.g. 16.35)" required style="flex:1;">
+                <input name="recovery" placeholder="Recovery (e.g. 3:30)" style="flex:1;">
+            </div>
+            <label class="checkbox-label"><span>Last set</span><input type="checkbox" name="last"></label>
+          `;
       } else { 
-          content = `<h4>Set ${seriesCount} (Gym)</h4><input name="reps" placeholder="Reps (e.g. 5x5)" required><input name="weight" placeholder="Weight (e.g. 100kg)" required>`;
+          content = `
+            <h4>Set ${seriesCount} (Gym)</h4>
+            <input name="reps" placeholder="Reps (e.g. 5x5)" required>
+            <input name="weight" placeholder="Weight (e.g. 100kg)" required>
+          `;
       }
       
       seriesContainer.insertAdjacentHTML("beforeend", `<div class="card seriesCard" id="${sid}" data-type="${type}"><button class="deleteSeries" type="button" onclick="this.parentElement.remove()">✕</button>${content}</div>`);
@@ -485,7 +625,6 @@ function renderDayEntries(main) {
     const f = e.target;
     const uid = currentUser.uid;
     
-    // workout select has name="workout", so f.workout.value works as before
     const dayEntry = { workout_id: f.workout.value, date: f.date.value, notes: f.notes.value };
     const dayEntryRef = await db.collection(`users/${uid}/dayEntries`).add(dayEntry);
     
@@ -498,7 +637,10 @@ function renderDayEntries(main) {
 
       if (type === 'track') {
         const time = card.querySelector('[name=time]').value; if (!time) return;
+        const dist = card.querySelector('[name=distance]').value;
+        
         seriesData.run_time = parseFloat(time);
+        seriesData.distance_meters = dist ? parseFloat(dist) : null; // Save Distance
         seriesData.recovery_seconds = card.querySelector('[name=last]').checked ? null : parseRecovery(card.querySelector('[name=recovery]').value);
         seriesData.is_last = card.querySelector('[name=last]').checked;
       } else { 
@@ -510,11 +652,9 @@ function renderDayEntries(main) {
     });
     
     await batch.commit();
-    // Reset form logic
     f.notes.value = "";
     document.getElementById("seriesContainer").innerHTML = "";
     seriesCount = 0;
-    // We keep the cycle/workout selection for convenience of entering multiple days/data
   };
 
   updateDayList();
@@ -531,7 +671,14 @@ function updateDayList() {
       const s = data.seriesSets.filter(s => s.day_entry_id === d.id).sort((a,b) => a.index - b.index);
 
       let seriesContent = s.map(ss => {
-          if (ss.type === 'track') return `${ss.run_time}s` + (ss.is_last ? " (last)" : ` [rec: ${formatRecoveryForDisplay(ss.recovery_seconds)}]`);
+          if (ss.type === 'track') {
+              // UPDATED: Display distance in list with Visual Cue for missing data
+              const dist = ss.distance_meters 
+                  ? `<b>${ss.distance_meters}m</b> in ` 
+                  : `<span style="color:#ffb300; font-size:0.8em; border:1px solid #ffb300; padding:1px 4px; border-radius:4px;">⚠️ Set Dist</span> `;
+                  
+              return `${dist}${ss.run_time}s` + (ss.is_last ? " (last)" : ` [rec: ${formatRecoveryForDisplay(ss.recovery_seconds)}]`);
+          }
           return `${ss.reps} @ ${ss.weight}`;
       }).join("<br>");
       
@@ -563,7 +710,16 @@ window.editDayEntry = function(id) {
   function getSeriesCardHTML(s, index) {
       const type = s.type || workout?.type || 'track';
       if (type === 'track') {
-          return `<div class="card seriesCard" data-type="track"><h4>Series ${index + 1}</h4><input class="runTime" value="${s.run_time || ''}" placeholder="Time"><input class="recTime" value="${s.is_last ? "" : formatRecovery(s.recovery_seconds) || ""}" placeholder="Recovery"><label class="checkbox-label"><span>Last set</span><input type="checkbox" class="isLast" ${s.is_last ? "checked" : ""}></label><button type="button" class="deleteSeries" onclick="this.parentElement.remove()">✕</button></div>`;
+          // UPDATED: Edit form includes Distance
+          return `
+            <div class="card seriesCard" data-type="track">
+                <h4>Series ${index + 1}</h4>
+                <input class="distInput" value="${s.distance_meters || ''}" placeholder="Dist (m)" type="number">
+                <input class="runTime" value="${s.run_time || ''}" placeholder="Time">
+                <input class="recTime" value="${s.is_last ? "" : formatRecovery(s.recovery_seconds) || ""}" placeholder="Recovery">
+                <label class="checkbox-label"><span>Last set</span><input type="checkbox" class="isLast" ${s.is_last ? "checked" : ""}></label>
+                <button type="button" class="deleteSeries" onclick="this.parentElement.remove()">✕</button>
+            </div>`;
       } else {
           return `<div class="card seriesCard" data-type="gym"><h4>Set ${index + 1}</h4><input class="reps" value="${s.reps || ''}" placeholder="Reps"><input class="weight" value="${s.weight || ''}" placeholder="Weight"><button type="button" class="deleteSeries" onclick="this.parentElement.remove()">✕</button></div>`;
       }
@@ -585,7 +741,10 @@ window.editDayEntry = function(id) {
         let seriesData = { day_entry_id: d.id, index: i + 1, type: card.dataset.type };
         if (seriesData.type === 'track') {
             const timeVal = card.querySelector(".runTime").value; if (!timeVal) return;
+            const distVal = card.querySelector(".distInput").value;
+            
             seriesData.run_time = parseFloat(timeVal);
+            seriesData.distance_meters = distVal ? parseFloat(distVal) : null; // Save updated distance
             seriesData.is_last = card.querySelector(".isLast").checked;
             seriesData.recovery_seconds = seriesData.is_last ? null : parseRecovery(card.querySelector(".recTime").value);
         } else {

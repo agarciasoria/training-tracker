@@ -86,7 +86,7 @@
       color: var(--accent);
     }
 
-    form, #summaryFilters {
+    form, #summaryFilters, #statsControls {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
@@ -197,6 +197,14 @@
       background: #23262e;
       margin-top: 5px;
     }
+    
+    #chartContainer {
+        background: var(--card-bg);
+        padding: 15px;
+        border-radius: 10px;
+        height: 400px;
+        position: relative;
+    }
 
     #modalOverlay {
       position: fixed;
@@ -262,7 +270,7 @@
         gap: 10px;
       }
 
-      form, #summaryFilters {
+      form, #summaryFilters, #statsControls {
         flex-direction: column;
       }
 
@@ -271,7 +279,6 @@
       }
     }
   </style>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
   <header>
@@ -279,8 +286,8 @@
         <button onclick="showSection('cycles')">🏁 Cycles</button>
         <button onclick="showSection('workouts')">💪 Workouts</button>
         <button onclick="showSection('dayEntries')">📅 Day Entries</button>
-        <!-- NEW FEATURE: Summary Button -->
         <button onclick="showSection('summary')">📊 Summary</button>
+        <button onclick="showSection('stats')">📈 Stats</button>
     </div>
     <div id="authContainer">
         <button id="loginBtn">Sign in with Google</button>
@@ -305,6 +312,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <script>
     // Paste your Firebase config object here.
@@ -345,6 +353,5 @@
       document.getElementById("modalConfirm").className = "btn-save";
     }
   </script>
-<script type="module" src="/index.tsx"></script>
 </body>
 </html>
