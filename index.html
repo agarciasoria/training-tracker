@@ -110,6 +110,13 @@
       color: var(--text);
     }
     
+    /* ADDED: Visual cue for disabled select inputs */
+    select:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: #202229;
+    }
+    
     .checkbox-label {
       display: flex;
       align-items: center;
@@ -264,6 +271,7 @@
       }
     }
   </style>
+<link rel="stylesheet" href="/index.css">
 </head>
 <body>
   <header>
@@ -337,5 +345,6 @@
       document.getElementById("modalConfirm").className = "btn-save";
     }
   </script>
+<script type="module" src="/index.tsx"></script>
 </body>
 </html>

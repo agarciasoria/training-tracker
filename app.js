@@ -106,6 +106,7 @@ function showSection(section) {
   if (section === "dayEntries") renderDayEntries(main);
   if (section === "summary") renderSummary(main); // NEW FEATURE
 }
+window.showSection = showSection; // BUG FIX: Expose showSection to window
 
 // ===== NEW FEATURE: Summary Page =====
 function renderSummary(main) {
@@ -381,28 +382,81 @@ window.deleteWorkout = function(id) {
 };
 
 
-// ===== Day Entries (Refactored for Firebase) =====
+// ===== Day Entries (UPDATED: Cycle Filtering) =====
 function renderDayEntries(main) {
-  if (data.workouts.length === 0) {
-    main.innerHTML = "<h2>Day Entries</h2><p>Please add a workout first.</p>";
+  if (data.cycles.length === 0) {
+    main.innerHTML = "<h2>Day Entries</h2><p>Please add a training cycle first.</p>";
     return;
   }
+  
+  // NEW: Render two selects. Logic is handled by listeners below.
   main.innerHTML = `
     <h2>Day Entries</h2>
     <form id="dayForm">
-      <select name="workout" id="dayWorkoutSelect">${data.workouts.map(w => `<option value="${w.id}">${w.name} (${w.type})</option>`).join("")}</select>
+      <select id="dayCycleSelect">
+        <option value="">1. Select Cycle...</option>
+        ${data.cycles.sort((a,b) => b.start_date.localeCompare(a.start_date))
+          .map(c => `<option value="${c.id}">${c.name}</option>`).join("")}
+      </select>
+      
+      <select name="workout" id="dayWorkoutSelect" disabled required>
+        <option value="">2. Select Cycle First...</option>
+      </select>
+      
       <input name="date" type="date" value="${new Date().toISOString().split('T')[0]}" required>
       <textarea name="notes" placeholder="Notes (e.g. felt good, windy)"></textarea>
+      
       <div id="seriesContainer" style="width: 100%; display: flex; flex-direction: column; gap: 5px;"></div>
-      <button type="button" id="addSeries">+ Add Series/Set</button>
-      <button type="submit">Save Day Entry</button>
+      
+      <div id="entryActions" style="display:none; gap:10px; margin-top:10px;">
+        <button type="button" id="addSeries">+ Add Series/Set</button>
+        <button type="submit">Save Day Entry</button>
+      </div>
     </form>
     <div id="dayList"></div>
   `;
   
+  const cycleSelect = document.getElementById("dayCycleSelect");
   const workoutSelect = document.getElementById("dayWorkoutSelect");
   const seriesContainer = document.getElementById("seriesContainer");
+  const entryActions = document.getElementById("entryActions");
   let seriesCount = 0;
+
+  // NEW: Listener for Cycle Change
+  cycleSelect.onchange = () => {
+      const cycleId = cycleSelect.value;
+      seriesContainer.innerHTML = "";
+      seriesCount = 0;
+      entryActions.style.display = "none"; // Hide buttons if cycle changes
+      
+      if (!cycleId) {
+          workoutSelect.innerHTML = '<option value="">2. Select Cycle First...</option>';
+          workoutSelect.disabled = true;
+          return;
+      }
+
+      const filteredWorkouts = data.workouts.filter(w => w.cycle_id === cycleId);
+      
+      if (filteredWorkouts.length === 0) {
+          workoutSelect.innerHTML = '<option value="">No workouts in this cycle</option>';
+          workoutSelect.disabled = true;
+      } else {
+          workoutSelect.innerHTML = '<option value="">2. Select Workout...</option>' + 
+              filteredWorkouts.map(w => `<option value="${w.id}">${w.name} (${w.type})</option>`).join("");
+          workoutSelect.disabled = false;
+      }
+  };
+
+  // NEW: Listener for Workout Change
+  workoutSelect.onchange = () => {
+      seriesContainer.innerHTML = "";
+      seriesCount = 0;
+      if (workoutSelect.value) {
+          entryActions.style.display = "flex"; // Show buttons only when workout selected
+      } else {
+          entryActions.style.display = "none";
+      }
+  };
 
   function getWorkoutType() {
       const selectedWorkout = data.workouts.find(w => w.id === workoutSelect.value);
@@ -425,13 +479,13 @@ function renderDayEntries(main) {
   }
   
   document.getElementById("addSeries").onclick = addSeriesCard;
-  workoutSelect.onchange = () => { seriesContainer.innerHTML = ""; seriesCount = 0; };
 
   document.getElementById("dayForm").onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
     const uid = currentUser.uid;
     
+    // workout select has name="workout", so f.workout.value works as before
     const dayEntry = { workout_id: f.workout.value, date: f.date.value, notes: f.notes.value };
     const dayEntryRef = await db.collection(`users/${uid}/dayEntries`).add(dayEntry);
     
@@ -456,9 +510,11 @@ function renderDayEntries(main) {
     });
     
     await batch.commit();
-    document.getElementById("dayForm").reset();
+    // Reset form logic
+    f.notes.value = "";
     document.getElementById("seriesContainer").innerHTML = "";
     seriesCount = 0;
+    // We keep the cycle/workout selection for convenience of entering multiple days/data
   };
 
   updateDayList();
