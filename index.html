@@ -264,18 +264,42 @@
       color: white;
     }
 
+    /* Mobile Improvements */
     @media (max-width: 600px) {
       header {
         flex-direction: column;
-        gap: 10px;
+        align-items: stretch;
+        gap: 12px;
+        padding: 12px 10px;
+      }
+      
+      header div {
+          width: 100%;
+          justify-content: center;
+          flex-wrap: wrap; /* Key fix: Allow buttons to wrap */
+          gap: 6px;
+      }
+      
+      header button {
+          flex: 1 1 30%; /* Distribute space comfortably */
+          min-width: 80px;
+          text-align: center;
+          padding: 8px 4px;
+          font-size: 0.9rem;
       }
 
       form, #summaryFilters, #statsControls {
         flex-direction: column;
+        align-items: stretch;
       }
 
       button, input, select, textarea {
         width: 100%;
+      }
+      
+      /* Ensure series inputs stack nicely inside card */
+      .seriesCard div {
+          flex-wrap: wrap;
       }
     }
   </style>
@@ -285,7 +309,7 @@
     <div>
         <button onclick="showSection('cycles')">🏁 Cycles</button>
         <button onclick="showSection('workouts')">💪 Workouts</button>
-        <button onclick="showSection('dayEntries')">📅 Day Entries</button>
+        <button onclick="showSection('dayEntries')">📅 Entries</button>
         <button onclick="showSection('summary')">📊 Summary</button>
         <button onclick="showSection('stats')">📈 Stats</button>
     </div>

@@ -535,7 +535,7 @@ function renderDayEntries(main) {
       
       <div id="seriesContainer" style="width: 100%; display: flex; flex-direction: column; gap: 5px;"></div>
       
-      <div id="entryActions" style="display:none; gap:10px; margin-top:10px;">
+      <div id="entryActions" style="display:none; gap:10px; margin-top:10px; flex-wrap: wrap;">
         <button type="button" id="addSeries">+ Add Series/Set</button>
         <button type="submit">Save Day Entry</button>
       </div>
