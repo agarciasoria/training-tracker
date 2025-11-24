@@ -170,11 +170,11 @@ function renderStats(main) {
         } else {
             // --- GYM LOGIC ---
             const names = new Set();
-            // Get all workouts of type gym
-            const gymWorkouts = data.workouts.filter(w => w.type === 'gym');
-            // Normalize names (trim) to group effectively
-            gymWorkouts.forEach(w => {
-                if(w.name) names.add(w.name.trim());
+            // Get all workouts of type gym, regardless of cycle
+            data.workouts.forEach(w => {
+                if (w.type === 'gym' && w.name) {
+                    names.add(w.name.trim());
+                }
             });
             
             const sorted = Array.from(names).sort();
@@ -223,9 +223,11 @@ function updateChart(ctx, type, param) {
                 });
             });
         });
+        // Sort by date for Track
+        points.sort((a, b) => new Date(a.x) - new Date(b.x));
         
     } else {
-        // --- GYM CHART LOGIC ---
+        // --- GYM CHART LOGIC (UPDATED) ---
         const workoutName = param;
         // 1. Find all workout IDs that match this name (across all cycles)
         const targetWorkoutIds = data.workouts
@@ -233,41 +235,37 @@ function updateChart(ctx, type, param) {
             .map(w => w.id);
             
         // 2. Find entries belonging to these workouts
-        data.dayEntries.forEach(entry => {
-            if (targetWorkoutIds.includes(entry.workout_id)) {
-                // 3. Find Max Weight for this day
-                const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id);
-                let maxWeight = 0;
-                let hasData = false;
-                
-                sets.forEach(s => {
-                    const w = parseFloat(s.weight); // Parse "100" or "100kg"
-                    if (!isNaN(w) && w > maxWeight) {
-                        maxWeight = w;
-                        hasData = true;
-                    }
-                });
-                
-                if (hasData) {
+        const relevantEntries = data.dayEntries
+            .filter(e => targetWorkoutIds.includes(e.workout_id))
+            .sort((a, b) => a.date.localeCompare(b.date)); // Sort days chronologically
+
+        relevantEntries.forEach(entry => {
+            // 3. Get all sets for this day, in order
+            const sets = data.seriesSets
+                .filter(s => s.day_entry_id === entry.id)
+                .sort((a, b) => a.index - b.index);
+
+            // 4. Plot EVERY set
+            sets.forEach(s => {
+                const w = parseFloat(s.weight); // Parse "100" or "100kg"
+                if (!isNaN(w)) {
                     points.push({
                         x: entry.date,
-                        y: maxWeight,
+                        y: w,
                         workoutName: workoutName,
-                        extra: `Max of ${sets.length} sets`
+                        extra: `${s.reps} reps` // Tooltip will show this
                     });
                 }
-            }
+            });
         });
     }
-
-    points.sort((a, b) => new Date(a.x) - new Date(b.x));
 
     if (myChart) myChart.destroy();
 
     // Visuals based on Type
     const label = type === 'track' 
         ? `${param}m Performance (Seconds)` 
-        : `${param} Performance (kg)`;
+        : `${param} History (kg)`;
         
     const color = type === 'track' ? '#4caf50' : '#2196F3'; // Green vs Blue
     const bg = type === 'track' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
@@ -283,7 +281,9 @@ function updateChart(ctx, type, param) {
                 backgroundColor: bg,
                 borderWidth: 2,
                 pointRadius: 4,
-                tension: 0.1
+                tension: 0.1,
+                // Gym chart connects sets with a line, visualizing the volume/intensity sequence
+                showLine: true 
             }]
         },
         options: {
@@ -310,7 +310,7 @@ function updateChart(ctx, type, param) {
                     callbacks: {
                         afterLabel: function(context) {
                             const p = points[context.dataIndex];
-                            return [`Workout: ${p.workoutName}`, p.extra];
+                            return p.extra; // "Rec: 3:00" or "5 reps"
                         }
                     }
                 }
