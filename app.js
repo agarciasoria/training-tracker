@@ -113,33 +113,16 @@ window.showSection = showSection; // BUG FIX: Expose showSection to window
 let myChart = null;
 
 function renderStats(main) {
-    // 1. Find all unique distances recorded in Track series
-    const distances = new Set();
-    // Check for missing legacy data
-    const missingDistCount = data.seriesSets.filter(s => s.type === 'track' && !s.distance_meters).length;
-    
-    data.seriesSets.forEach(s => {
-        if (s.type === 'track' && s.distance_meters) {
-            distances.add(s.distance_meters);
-        }
-    });
-    
-    const sortedDistances = Array.from(distances).sort((a, b) => a - b);
-    
-    let warningHTML = '';
-    if (missingDistCount > 0) {
-        warningHTML = `<div style="background: #332b00; border: 1px solid #ffb300; padding: 10px; border-radius: 6px; margin-bottom: 10px; color: #ffe082;">
-            ⚠️ <b>Legacy Data:</b> You have ${missingDistCount} track runs without a specified distance. 
-            Go to 'Day Entries' and Edit them (look for the <span style="color:#ffb300">[⚠️ Set Dist]</span> tag) to see them here.
-        </div>`;
-    }
-
     main.innerHTML = `
         <h2>Progress Analytics</h2>
-        ${warningHTML}
+        <div id="statsWarningContainer"></div>
         <div id="statsControls">
-            <select id="distanceSelect">
-                <option value="">Select a Distance...</option>
+            <select id="statsType">
+                <option value="track">Track (Time vs Distance)</option>
+                <option value="gym">Gym (Weight vs Date)</option>
+            </select>
+            <select id="statsParameter">
+                <option value="">Select Parameter...</option>
             </select>
         </div>
         <div id="chartContainer">
@@ -147,57 +130,157 @@ function renderStats(main) {
         </div>
     `;
 
-    const distanceSelect = document.getElementById('distanceSelect');
-    
-    if (sortedDistances.length === 0) {
-        distanceSelect.innerHTML = '<option>No track distances recorded yet.</option>';
-        distanceSelect.disabled = true;
-    } else {
-        distanceSelect.innerHTML = '<option value="">Select a Distance...</option>' + 
-            sortedDistances.map(d => `<option value="${d}">${d}m</option>`).join('');
-    }
-
+    const statsType = document.getElementById('statsType');
+    const statsParameter = document.getElementById('statsParameter');
+    const warningContainer = document.getElementById('statsWarningContainer');
     const ctx = document.getElementById('progressChart').getContext('2d');
 
-    distanceSelect.addEventListener('change', (e) => {
-        const dist = parseFloat(e.target.value);
-        if (!dist) return;
-        updateChart(ctx, dist);
+    function updateOptions() {
+        const type = statsType.value;
+        statsParameter.innerHTML = '<option value="">Select...</option>';
+        statsParameter.disabled = false;
+        warningContainer.innerHTML = '';
+
+        if (type === 'track') {
+            // --- TRACK LOGIC ---
+            const distances = new Set();
+            let missingDistCount = 0;
+            
+            data.seriesSets.forEach(s => {
+                if (s.type === 'track') {
+                    if (s.distance_meters) distances.add(s.distance_meters);
+                    else missingDistCount++;
+                }
+            });
+            
+            if (missingDistCount > 0) {
+                warningContainer.innerHTML = `<div style="background: #332b00; border: 1px solid #ffb300; padding: 10px; border-radius: 6px; margin-bottom: 10px; color: #ffe082;">
+                    ⚠️ <b>Legacy Data:</b> ${missingDistCount} track runs have no distance. Edit them in Day Entries.
+                </div>`;
+            }
+
+            const sorted = Array.from(distances).sort((a,b) => a-b);
+            if (sorted.length === 0) {
+                statsParameter.innerHTML = '<option>No track data found</option>';
+                statsParameter.disabled = true;
+            } else {
+                statsParameter.innerHTML += sorted.map(d => `<option value="${d}">${d}m</option>`).join('');
+            }
+
+        } else {
+            // --- GYM LOGIC ---
+            const names = new Set();
+            // Get all workouts of type gym
+            const gymWorkouts = data.workouts.filter(w => w.type === 'gym');
+            // Normalize names (trim) to group effectively
+            gymWorkouts.forEach(w => {
+                if(w.name) names.add(w.name.trim());
+            });
+            
+            const sorted = Array.from(names).sort();
+            
+            if (sorted.length === 0) {
+                statsParameter.innerHTML = '<option>No gym workouts found</option>';
+                statsParameter.disabled = true;
+            } else {
+                statsParameter.innerHTML += sorted.map(n => `<option value="${n}">${n}</option>`).join('');
+            }
+        }
+    }
+
+    statsType.addEventListener('change', () => {
+        updateOptions();
+        // Reset chart when type changes
+        if (myChart) {
+            myChart.destroy();
+            myChart = null;
+        }
     });
+
+    statsParameter.addEventListener('change', () => {
+        if (!statsParameter.value) return;
+        updateChart(ctx, statsType.value, statsParameter.value);
+    });
+
+    // Initial load
+    updateOptions();
 }
 
-function updateChart(ctx, distance) {
-    // 2. Filter data for this distance
+function updateChart(ctx, type, param) {
     const points = [];
     
-    data.dayEntries.forEach(entry => {
-        const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id && s.distance_meters === distance);
-        sets.forEach(s => {
-            // Find workout name
-            const workout = data.workouts.find(w => w.id === entry.workout_id);
-            points.push({
-                x: entry.date,
-                y: s.run_time,
-                workoutName: workout ? workout.name : 'Unknown',
-                recovery: formatRecoveryForDisplay(s.recovery_seconds)
+    if (type === 'track') {
+        const distance = parseFloat(param);
+        data.dayEntries.forEach(entry => {
+            const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id && s.distance_meters === distance);
+            sets.forEach(s => {
+                const workout = data.workouts.find(w => w.id === entry.workout_id);
+                points.push({
+                    x: entry.date,
+                    y: s.run_time,
+                    workoutName: workout ? workout.name : 'Unknown',
+                    extra: `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}`
+                });
             });
         });
-    });
+        
+    } else {
+        // --- GYM CHART LOGIC ---
+        const workoutName = param;
+        // 1. Find all workout IDs that match this name (across all cycles)
+        const targetWorkoutIds = data.workouts
+            .filter(w => w.type === 'gym' && w.name.trim() === workoutName)
+            .map(w => w.id);
+            
+        // 2. Find entries belonging to these workouts
+        data.dayEntries.forEach(entry => {
+            if (targetWorkoutIds.includes(entry.workout_id)) {
+                // 3. Find Max Weight for this day
+                const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id);
+                let maxWeight = 0;
+                let hasData = false;
+                
+                sets.forEach(s => {
+                    const w = parseFloat(s.weight); // Parse "100" or "100kg"
+                    if (!isNaN(w) && w > maxWeight) {
+                        maxWeight = w;
+                        hasData = true;
+                    }
+                });
+                
+                if (hasData) {
+                    points.push({
+                        x: entry.date,
+                        y: maxWeight,
+                        workoutName: workoutName,
+                        extra: `Max of ${sets.length} sets`
+                    });
+                }
+            }
+        });
+    }
 
-    // Sort by date
     points.sort((a, b) => new Date(a.x) - new Date(b.x));
 
     if (myChart) myChart.destroy();
+
+    // Visuals based on Type
+    const label = type === 'track' 
+        ? `${param}m Performance (Seconds)` 
+        : `${param} Performance (kg)`;
+        
+    const color = type === 'track' ? '#4caf50' : '#2196F3'; // Green vs Blue
+    const bg = type === 'track' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
 
     myChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: points.map(p => p.x),
             datasets: [{
-                label: `${distance}m Performance (Seconds)`,
+                label: label,
                 data: points.map(p => p.y),
-                borderColor: '#4caf50',
-                backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                borderColor: color,
+                backgroundColor: bg,
                 borderWidth: 2,
                 pointRadius: 4,
                 tension: 0.1
@@ -214,7 +297,11 @@ function updateChart(ctx, distance) {
                 y: { 
                     ticks: { color: '#bbb' }, 
                     grid: { color: '#333' },
-                    title: { display: true, text: 'Time (s)', color: '#bbb' }
+                    title: { 
+                        display: true, 
+                        text: type === 'track' ? 'Time (s)' : 'Weight (kg)', 
+                        color: '#bbb' 
+                    }
                 }
             },
             plugins: {
@@ -223,7 +310,7 @@ function updateChart(ctx, distance) {
                     callbacks: {
                         afterLabel: function(context) {
                             const p = points[context.dataIndex];
-                            return [`Workout: ${p.workoutName}`, `Recovery: ${p.recovery}`];
+                            return [`Workout: ${p.workoutName}`, p.extra];
                         }
                     }
                 }
