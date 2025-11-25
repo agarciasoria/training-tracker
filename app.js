@@ -127,6 +127,12 @@ function renderStats(main) {
         </div>
         <div id="chartContainer">
             <canvas id="progressChart"></canvas>
+            <div id="gymLegend" style="display:none; justify-content: center; flex-wrap: wrap; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px solid #333; font-size: 0.85rem; color: #bbb;">
+                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#ff5252; border-radius:50%; margin-right:6px;"></span>1-3 (Max)</div>
+                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#ff9800; border-radius:50%; margin-right:6px;"></span>4-6 (Str)</div>
+                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#ffeb3b; border-radius:50%; margin-right:6px;"></span>7-12 (Hyp)</div>
+                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#4caf50; border-radius:50%; margin-right:6px;"></span>13+ (End)</div>
+            </div>
         </div>
     `;
 
@@ -195,6 +201,7 @@ function renderStats(main) {
             myChart.destroy();
             myChart = null;
         }
+        document.getElementById('gymLegend').style.display = 'none';
     });
 
     statsParameter.addEventListener('change', () => {
@@ -204,6 +211,15 @@ function renderStats(main) {
 
     // Initial load
     updateOptions();
+}
+
+function getRepColor(repsString) {
+    const r = parseInt(repsString);
+    if (isNaN(r)) return '#2196F3'; // Default Blue
+    if (r <= 3) return '#ff5252'; // Red (Max)
+    if (r <= 6) return '#ff9800'; // Orange (Strength)
+    if (r <= 12) return '#ffeb3b'; // Yellow (Hypertrophy)
+    return '#4caf50'; // Green (Endurance)
 }
 
 function updateChart(ctx, type, param) {
@@ -253,7 +269,8 @@ function updateChart(ctx, type, param) {
                         x: entry.date,
                         y: w,
                         workoutName: workoutName,
-                        extra: `${s.reps} reps` // Tooltip will show this
+                        extra: `${s.reps} reps`, // Tooltip will show this
+                        repsRaw: s.reps // NEW: Store raw reps for coloring
                     });
                 }
             });
@@ -266,9 +283,21 @@ function updateChart(ctx, type, param) {
     const label = type === 'track' 
         ? `${param}m Performance (Seconds)` 
         : `${param} History (kg)`;
-        
-    const color = type === 'track' ? '#4caf50' : '#2196F3'; // Green vs Blue
-    const bg = type === 'track' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
+    
+    // Default colors
+    const primaryColor = type === 'track' ? '#4caf50' : '#2196F3'; 
+    const bgColor = type === 'track' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
+    
+    // determine Point colors
+    let pointColors = primaryColor;
+    const legend = document.getElementById('gymLegend');
+    
+    if (legend) legend.style.display = 'none';
+
+    if (type === 'gym') {
+        pointColors = points.map(p => getRepColor(p.repsRaw));
+        if (legend) legend.style.display = 'flex';
+    }
 
     myChart = new Chart(ctx, {
         type: 'line',
@@ -277,10 +306,12 @@ function updateChart(ctx, type, param) {
             datasets: [{
                 label: label,
                 data: points.map(p => p.y),
-                borderColor: color,
-                backgroundColor: bg,
+                borderColor: primaryColor,
+                backgroundColor: bgColor,
+                pointBackgroundColor: pointColors, // Apply dynamic colors
+                pointBorderColor: pointColors,
                 borderWidth: 2,
-                pointRadius: 4,
+                pointRadius: 5,
                 tension: 0.1,
                 // Gym chart connects sets with a line, visualizing the volume/intensity sequence
                 showLine: true 
