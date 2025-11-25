@@ -127,11 +127,14 @@ function renderStats(main) {
         </div>
         <div id="chartContainer">
             <canvas id="progressChart"></canvas>
-            <div id="gymLegend" style="display:none; justify-content: center; flex-wrap: wrap; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px solid #333; font-size: 0.85rem; color: #bbb;">
-                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#ff5252; border-radius:50%; margin-right:6px;"></span>1-3 (Max)</div>
-                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#ff9800; border-radius:50%; margin-right:6px;"></span>4-6 (Str)</div>
-                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#ffeb3b; border-radius:50%; margin-right:6px;"></span>7-12 (Hyp)</div>
-                <div style="display:flex; align-items:center;"><span style="width:12px; height:12px; background:#4caf50; border-radius:50%; margin-right:6px;"></span>13+ (End)</div>
+            <div id="gymLegend" style="display:none; flex-direction:column; align-items:center; margin-top:15px; padding-top:10px; border-top:1px solid #333; color:#bbb;">
+                <div style="font-size:0.85rem; margin-bottom:5px;">Reps Intensity Scale</div>
+                <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
+                <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
+                    <span>1 (Max)</span>
+                    <span>6 (Str)</span>
+                    <span>12+ (End)</span>
+                </div>
             </div>
         </div>
     `;
@@ -215,11 +218,15 @@ function renderStats(main) {
 
 function getRepColor(repsString) {
     const r = parseInt(repsString);
-    if (isNaN(r)) return '#2196F3'; // Default Blue
-    if (r <= 3) return '#ff5252'; // Red (Max)
-    if (r <= 6) return '#ff9800'; // Orange (Strength)
-    if (r <= 12) return '#ffeb3b'; // Yellow (Hypertrophy)
-    return '#4caf50'; // Green (Endurance)
+    if (isNaN(r)) return '#2196F3'; 
+    
+    // Continuous scale from Red (0 deg) to Green (120 deg)
+    // 1 Rep = 0 (Pure Red, Max Intensity)
+    // 12 Reps = 120 (Pure Green, Endurance)
+    const maxReps = 12;
+    const hue = Math.min(120, Math.max(0, (r - 1) * (120 / (maxReps - 1))));
+    
+    return `hsl(${Math.round(hue)}, 100%, 45%)`;
 }
 
 function updateChart(ctx, type, param) {
@@ -270,7 +277,7 @@ function updateChart(ctx, type, param) {
                         y: w,
                         workoutName: workoutName,
                         extra: `${s.reps} reps`, // Tooltip will show this
-                        repsRaw: s.reps // NEW: Store raw reps for coloring
+                        repsRaw: s.reps // Store raw reps for coloring
                     });
                 }
             });
@@ -311,7 +318,7 @@ function updateChart(ctx, type, param) {
                 pointBackgroundColor: pointColors, // Apply dynamic colors
                 pointBorderColor: pointColors,
                 borderWidth: 2,
-                pointRadius: 5,
+                pointRadius: 6,
                 tension: 0.1,
                 // Gym chart connects sets with a line, visualizing the volume/intensity sequence
                 showLine: true 
