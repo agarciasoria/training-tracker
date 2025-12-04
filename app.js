@@ -127,14 +127,8 @@ function renderStats(main) {
         </div>
         <div id="chartContainer">
             <canvas id="progressChart"></canvas>
-            <div id="gymLegend" style="display:none; flex-direction:column; align-items:center; margin-top:15px; padding-top:10px; border-top:1px solid #333; color:#bbb;">
-                <div style="font-size:0.85rem; margin-bottom:5px;">Reps Intensity Scale</div>
-                <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
-                <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
-                    <span>1 (Max)</span>
-                    <span>6 (Str)</span>
-                    <span>12+ (End)</span>
-                </div>
+            <div id="chartLegend" style="display:none; flex-direction:column; align-items:center; margin-top:15px; padding-top:10px; border-top:1px solid #333; color:#bbb;">
+                <!-- Legend Content Injected Dynamically -->
             </div>
         </div>
     `;
@@ -204,7 +198,7 @@ function renderStats(main) {
             myChart.destroy();
             myChart = null;
         }
-        document.getElementById('gymLegend').style.display = 'none';
+        document.getElementById('chartLegend').style.display = 'none';
     });
 
     statsParameter.addEventListener('change', () => {
@@ -229,6 +223,20 @@ function getRepColor(repsString) {
     return `hsl(${Math.round(hue)}, 100%, 45%)`;
 }
 
+function getRecoveryColor(seconds, isLast) {
+    if (isLast) return '#E040FB'; // Distinct Magenta for Final Rep
+    if (seconds == null) return '#888';
+
+    // Map Short Recovery (30s) to Red (0deg)
+    // Map Long Recovery (5m/300s) to Green (120deg)
+    const minRec = 30;
+    const maxRec = 300; 
+    const clamped = Math.max(minRec, Math.min(seconds, maxRec));
+    const hue = ((clamped - minRec) / (maxRec - minRec)) * 120;
+    
+    return `hsl(${Math.round(hue)}, 100%, 45%)`;
+}
+
 function updateChart(ctx, type, param) {
     const points = [];
     
@@ -242,7 +250,9 @@ function updateChart(ctx, type, param) {
                     x: entry.date,
                     y: s.run_time,
                     workoutName: workout ? workout.name : 'Unknown',
-                    extra: `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}`
+                    extra: s.is_last ? "Final Rep" : `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}`,
+                    recRaw: s.recovery_seconds,
+                    isLast: s.is_last
                 });
             });
         });
@@ -250,34 +260,30 @@ function updateChart(ctx, type, param) {
         points.sort((a, b) => new Date(a.x) - new Date(b.x));
         
     } else {
-        // --- GYM CHART LOGIC (UPDATED) ---
+        // --- GYM CHART LOGIC ---
         const workoutName = param;
-        // 1. Find all workout IDs that match this name (across all cycles)
         const targetWorkoutIds = data.workouts
             .filter(w => w.type === 'gym' && w.name.trim() === workoutName)
             .map(w => w.id);
             
-        // 2. Find entries belonging to these workouts
         const relevantEntries = data.dayEntries
             .filter(e => targetWorkoutIds.includes(e.workout_id))
-            .sort((a, b) => a.date.localeCompare(b.date)); // Sort days chronologically
+            .sort((a, b) => a.date.localeCompare(b.date));
 
         relevantEntries.forEach(entry => {
-            // 3. Get all sets for this day, in order
             const sets = data.seriesSets
                 .filter(s => s.day_entry_id === entry.id)
                 .sort((a, b) => a.index - b.index);
 
-            // 4. Plot EVERY set
             sets.forEach(s => {
-                const w = parseFloat(s.weight); // Parse "100" or "100kg"
+                const w = parseFloat(s.weight);
                 if (!isNaN(w)) {
                     points.push({
                         x: entry.date,
                         y: w,
                         workoutName: workoutName,
-                        extra: `${s.reps} reps`, // Tooltip will show this
-                        repsRaw: s.reps // Store raw reps for coloring
+                        extra: `${s.reps} reps`, 
+                        repsRaw: s.reps 
                     });
                 }
             });
@@ -291,19 +297,43 @@ function updateChart(ctx, type, param) {
         ? `${param}m Performance (Seconds)` 
         : `${param} History (kg)`;
     
-    // Default colors
+    // Default base colors (used for line/fill, points will override)
     const primaryColor = type === 'track' ? '#4caf50' : '#2196F3'; 
     const bgColor = type === 'track' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
     
-    // determine Point colors
     let pointColors = primaryColor;
-    const legend = document.getElementById('gymLegend');
+    const legend = document.getElementById('chartLegend');
     
-    if (legend) legend.style.display = 'none';
-
-    if (type === 'gym') {
-        pointColors = points.map(p => getRepColor(p.repsRaw));
-        if (legend) legend.style.display = 'flex';
+    if (legend) {
+        legend.style.display = 'flex';
+        // Generate Dynamic Legend content
+        if (type === 'track') {
+            pointColors = points.map(p => getRecoveryColor(p.recRaw, p.isLast));
+            legend.innerHTML = `
+                <div style="font-size:0.85rem; margin-bottom:5px;">Recovery Duration Scale</div>
+                <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
+                <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
+                    <span>Short (<1m)</span>
+                    <span>Medium</span>
+                    <span>Long (5m+)</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:0.8rem;">
+                    <span style="width:10px; height:10px; background:#E040FB; border-radius:50%; display:inline-block;"></span>
+                    <span>Final Rep (No Recovery)</span>
+                </div>
+            `;
+        } else {
+            pointColors = points.map(p => getRepColor(p.repsRaw));
+            legend.innerHTML = `
+                <div style="font-size:0.85rem; margin-bottom:5px;">Reps Intensity Scale</div>
+                <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
+                <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
+                    <span>1 (Max)</span>
+                    <span>6 (Str)</span>
+                    <span>12+ (End)</span>
+                </div>
+            `;
+        }
     }
 
     myChart = new Chart(ctx, {
@@ -315,12 +345,11 @@ function updateChart(ctx, type, param) {
                 data: points.map(p => p.y),
                 borderColor: primaryColor,
                 backgroundColor: bgColor,
-                pointBackgroundColor: pointColors, // Apply dynamic colors
+                pointBackgroundColor: pointColors, 
                 pointBorderColor: pointColors,
                 borderWidth: 2,
                 pointRadius: 6,
                 tension: 0.1,
-                // Gym chart connects sets with a line, visualizing the volume/intensity sequence
                 showLine: true 
             }]
         },
@@ -348,7 +377,11 @@ function updateChart(ctx, type, param) {
                     callbacks: {
                         afterLabel: function(context) {
                             const p = points[context.dataIndex];
-                            return p.extra; // "Rec: 3:00" or "5 reps"
+                            // Show Workout Name on new line
+                            return [
+                                `Workout: ${p.workoutName}`,
+                                p.extra
+                            ];
                         }
                     }
                 }
