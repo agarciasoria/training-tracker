@@ -252,12 +252,20 @@ function updateChart(ctx, type, param) {
                     workoutName: workout ? workout.name : 'Unknown',
                     extra: s.is_last ? "Final Rep" : `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}`,
                     recRaw: s.recovery_seconds,
-                    isLast: s.is_last
+                    isLast: s.is_last,
+                    index: s.index // Capture index for sorting
                 });
             });
         });
-        // Sort by date for Track
-        points.sort((a, b) => new Date(a.x) - new Date(b.x));
+        // Sort by date THEN by index for correct intraday order
+        points.sort((a, b) => {
+            const dateA = new Date(a.x);
+            const dateB = new Date(b.x);
+            if (dateA < dateB) return -1;
+            if (dateA > dateB) return 1;
+            // Dates are equal, sort by series index
+            return (a.index || 0) - (b.index || 0);
+        });
         
     } else {
         // --- GYM CHART LOGIC ---
