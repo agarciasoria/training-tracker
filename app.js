@@ -95,6 +95,73 @@ function formatRecoveryForDisplay(sec) {
     return formatted === null ? "—" : formatted;
 }
 
+// ===== Season Management Helpers =====
+function getCycleSeason(cycle) {
+  if (!cycle) return '2026';
+  if (cycle.season && String(cycle.season).trim()) {
+    return String(cycle.season).trim();
+  }
+  // Backward compatibility: If season is not set, infer from start_date year or default to '2026'
+  if (cycle.start_date) {
+    const year = String(cycle.start_date).split('-')[0];
+    if (year && !isNaN(parseInt(year))) {
+      return year;
+    }
+  }
+  return '2026';
+}
+
+function getSeasonForWorkout(workoutId) {
+  const w = data.workouts.find(w => w.id === workoutId);
+  if (!w) return '2026';
+  const c = data.cycles.find(c => c.id === w.cycle_id);
+  return getCycleSeason(c);
+}
+
+function getAllSeasons() {
+  const seasons = new Set();
+  data.cycles.forEach(c => {
+    seasons.add(getCycleSeason(c));
+  });
+  if (seasons.size === 0) {
+    seasons.add('2026');
+    seasons.add('2027');
+  }
+  // Sort seasons descending (e.g. 2027, 2026)
+  return Array.from(seasons).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+}
+
+function getSuggestedNewSeason() {
+  const seasons = getAllSeasons();
+  const numYears = seasons
+    .map(s => parseInt(s))
+    .filter(n => !isNaN(n));
+  if (numYears.length > 0) {
+    const maxYear = Math.max(...numYears);
+    // If maximum recorded is 2026, suggest 2027
+    if (maxYear <= 2026) return '2027';
+    return String(maxYear);
+  }
+  return '2027';
+}
+
+const SEASON_PALETTE = [
+  { line: '#3b82f6', bg: 'rgba(59, 130, 246, 0.22)', border: '#60a5fa', name: 'Blue' },
+  { line: '#10b981', bg: 'rgba(16, 185, 129, 0.22)', border: '#34d399', name: 'Emerald' },
+  { line: '#f59e0b', bg: 'rgba(245, 158, 11, 0.22)', border: '#fbbf24', name: 'Amber' },
+  { line: '#ec4899', bg: 'rgba(236, 72, 153, 0.22)', border: '#f472b6', name: 'Pink' },
+  { line: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.22)', border: '#a78bfa', name: 'Purple' },
+  { line: '#06b6d4', bg: 'rgba(6, 182, 212, 0.22)', border: '#22d3ee', name: 'Cyan' }
+];
+
+function getSeasonColor(season, allSeasons) {
+  const index = allSeasons.indexOf(season);
+  if (index >= 0) {
+    return SEASON_PALETTE[index % SEASON_PALETTE.length];
+  }
+  return SEASON_PALETTE[0];
+}
+
 
 // ===== Section Rendering =====
 function showSection(section) {
@@ -109,12 +176,23 @@ function showSection(section) {
 }
 window.showSection = showSection; // BUG FIX: Expose showSection to window
 
-// ===== NEW FEATURE: Stats Page (Chart.js) =====
+// ===== Stats Page (Chart.js) with Multi-Season Comparison =====
 let myChart = null;
+let selectedSeasons = new Set();
+let statsComparisonMode = 'timeline'; // 'timeline' | 'overlay'
 
 function renderStats(main) {
+    const allSeasons = getAllSeasons();
+    // Default to all seasons if none selected yet
+    if (selectedSeasons.size === 0) {
+        allSeasons.forEach(s => selectedSeasons.add(s));
+    }
+
     main.innerHTML = `
-        <h2>Progress Analytics</h2>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;">
+            <h2>Progress Analytics</h2>
+            <div id="statsSeasonSummary" style="font-size: 0.85rem; color: #bbb;"></div>
+        </div>
         <div id="statsWarningContainer"></div>
         <div id="statsControls">
             <select id="statsType">
@@ -124,10 +202,39 @@ function renderStats(main) {
             <select id="statsParameter">
                 <option value="">Select Parameter...</option>
             </select>
+
+            <div style="width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid #333;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <div style="font-weight: 600; font-size: 0.9rem; color: var(--text); display: flex; align-items: center; gap: 6px;">
+                        <span>🏷️ Seasons:</span>
+                        <span id="seasonCountLabel" style="font-size: 0.8rem; font-weight: normal; color: #aaa;"></span>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        <button type="button" id="selectAllSeasonsBtn" style="background:#262932; color:#ccc; border:1px solid #444; border-radius:4px; padding:3px 8px; font-size:0.75rem; cursor:pointer;">Select All</button>
+                        <button type="button" id="selectLatestSeasonBtn" style="background:#262932; color:#ccc; border:1px solid #444; border-radius:4px; padding:3px 8px; font-size:0.75rem; cursor:pointer;">Latest Only</button>
+                    </div>
+                </div>
+                <div id="seasonPillsContainer" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                    <!-- Season pills rendered dynamically -->
+                </div>
+            </div>
+
+            <div id="modeToggleSection" style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; padding-top: 8px; border-top: 1px solid #2d313b;">
+                <span style="font-size: 0.85rem; color: #aaa;">Comparison Mode:</span>
+                <div style="display: flex; background: #202229; border-radius: 6px; padding: 2px; gap: 2px;">
+                    <button type="button" id="modeTimelineBtn" class="mode-btn ${statsComparisonMode === 'timeline' ? 'active' : ''}">📅 Chronological Timeline</button>
+                    <button type="button" id="modeOverlayBtn" class="mode-btn ${statsComparisonMode === 'overlay' ? 'active' : ''}">🔄 Side-by-Side Progression</button>
+                </div>
+            </div>
         </div>
+
+        <div id="seasonComparisonGrid"></div>
+
         <div id="chartContainer">
-            <canvas id="progressChart"></canvas>
-            <div id="chartLegend" style="display:none; flex-direction:column; align-items:center; margin-top:15px; padding-top:10px; border-top:1px solid #333; color:#bbb;">
+            <div id="chartCanvasWrapper">
+                <canvas id="progressChart"></canvas>
+            </div>
+            <div id="chartLegend" style="display:none; flex-direction:column; align-items:center; margin-top:12px; padding-top:10px; border-top:1px solid #333; color:#bbb;">
                 <!-- Legend Content Injected Dynamically -->
             </div>
         </div>
@@ -136,7 +243,76 @@ function renderStats(main) {
     const statsType = document.getElementById('statsType');
     const statsParameter = document.getElementById('statsParameter');
     const warningContainer = document.getElementById('statsWarningContainer');
+    const pillsContainer = document.getElementById('seasonPillsContainer');
+    const seasonCountLabel = document.getElementById('seasonCountLabel');
     const ctx = document.getElementById('progressChart').getContext('2d');
+    const modeTimelineBtn = document.getElementById('modeTimelineBtn');
+    const modeOverlayBtn = document.getElementById('modeOverlayBtn');
+
+    function renderSeasonPills() {
+        const seasons = getAllSeasons();
+        pillsContainer.innerHTML = '';
+        
+        seasons.forEach(s => {
+            const isActive = selectedSeasons.has(s);
+            const color = getSeasonColor(s, seasons);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `season-pill-btn ${isActive ? 'active' : ''}`;
+            btn.innerHTML = `<span class="color-indicator" style="background:${color.line};"></span>${isActive ? '✓ ' : ''}${s} Season`;
+            btn.onclick = () => {
+                if (selectedSeasons.has(s)) {
+                    // Prevent deselecting if it's the only one selected
+                    if (selectedSeasons.size > 1) {
+                        selectedSeasons.delete(s);
+                    }
+                } else {
+                    selectedSeasons.add(s);
+                }
+                renderSeasonPills();
+                triggerChartUpdate();
+            };
+            pillsContainer.appendChild(btn);
+        });
+
+        const activeCount = selectedSeasons.size;
+        seasonCountLabel.textContent = activeCount === 1 
+            ? `(Viewing ${Array.from(selectedSeasons)[0]})` 
+            : `(Comparing ${activeCount} seasons)`;
+    }
+
+    document.getElementById('selectAllSeasonsBtn').onclick = () => {
+        getAllSeasons().forEach(s => selectedSeasons.add(s));
+        renderSeasonPills();
+        triggerChartUpdate();
+    };
+
+    document.getElementById('selectLatestSeasonBtn').onclick = () => {
+        const seasons = getAllSeasons();
+        selectedSeasons.clear();
+        if (seasons.length > 0) selectedSeasons.add(seasons[0]);
+        renderSeasonPills();
+        triggerChartUpdate();
+    };
+
+    modeTimelineBtn.onclick = () => {
+        statsComparisonMode = 'timeline';
+        modeTimelineBtn.classList.add('active');
+        modeOverlayBtn.classList.remove('active');
+        triggerChartUpdate();
+    };
+
+    modeOverlayBtn.onclick = () => {
+        statsComparisonMode = 'overlay';
+        modeOverlayBtn.classList.add('active');
+        modeTimelineBtn.classList.remove('active');
+        triggerChartUpdate();
+    };
+
+    function triggerChartUpdate() {
+        if (!statsParameter.value) return;
+        updateChart(ctx, statsType.value, statsParameter.value);
+    }
 
     function updateOptions() {
         const type = statsType.value;
@@ -145,7 +321,6 @@ function renderStats(main) {
         warningContainer.innerHTML = '';
 
         if (type === 'track') {
-            // --- TRACK LOGIC ---
             const distances = new Set();
             let missingDistCount = 0;
             
@@ -169,11 +344,8 @@ function renderStats(main) {
             } else {
                 statsParameter.innerHTML += sorted.map(d => `<option value="${d}">${d}m</option>`).join('');
             }
-
         } else {
-            // --- GYM LOGIC ---
             const names = new Set();
-            // Get all workouts of type gym, regardless of cycle
             data.workouts.forEach(w => {
                 if (w.type === 'gym' && w.name) {
                     names.add(w.name.trim());
@@ -181,7 +353,6 @@ function renderStats(main) {
             });
             
             const sorted = Array.from(names).sort();
-            
             if (sorted.length === 0) {
                 statsParameter.innerHTML = '<option>No gym workouts found</option>';
                 statsParameter.disabled = true;
@@ -193,20 +364,19 @@ function renderStats(main) {
 
     statsType.addEventListener('change', () => {
         updateOptions();
-        // Reset chart when type changes
         if (myChart) {
             myChart.destroy();
             myChart = null;
         }
         document.getElementById('chartLegend').style.display = 'none';
+        document.getElementById('seasonComparisonGrid').innerHTML = '';
     });
 
     statsParameter.addEventListener('change', () => {
-        if (!statsParameter.value) return;
-        updateChart(ctx, statsType.value, statsParameter.value);
+        triggerChartUpdate();
     });
 
-    // Initial load
+    renderSeasonPills();
     updateOptions();
 }
 
@@ -215,11 +385,8 @@ function getRepColor(repsString) {
     if (isNaN(r)) return '#2196F3'; 
     
     // Continuous scale from Red (0 deg) to Green (120 deg)
-    // 1 Rep = 0 (Pure Red, Max Intensity)
-    // 12 Reps = 120 (Pure Green, Endurance)
     const maxReps = 12;
     const hue = Math.min(120, Math.max(0, (r - 1) * (120 / (maxReps - 1))));
-    
     return `hsl(${Math.round(hue)}, 100%, 45%)`;
 }
 
@@ -227,58 +394,44 @@ function getRecoveryColor(seconds, isLast) {
     if (isLast) return '#E040FB'; // Distinct Magenta for Final Rep
     if (seconds == null) return '#888';
 
-    // Map Short Recovery (30s) to Red (0deg)
-    // Map Long Recovery (5m/300s) to Green (120deg)
     const minRec = 30;
     const maxRec = 300; 
     const clamped = Math.max(minRec, Math.min(seconds, maxRec));
     const hue = ((clamped - minRec) / (maxRec - minRec)) * 120;
-    
     return `hsl(${Math.round(hue)}, 100%, 45%)`;
 }
 
 function updateChart(ctx, type, param) {
-    const points = [];
-    
+    const allSeasonsArray = getAllSeasons();
+    const rawPoints = [];
+
     if (type === 'track') {
         const distance = parseFloat(param);
         data.dayEntries.forEach(entry => {
+            const season = getSeasonForWorkout(entry.workout_id);
             const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id && s.distance_meters === distance);
             sets.forEach(s => {
                 const workout = data.workouts.find(w => w.id === entry.workout_id);
-                points.push({
+                rawPoints.push({
                     x: entry.date,
                     y: s.run_time,
+                    season: season,
                     workoutName: workout ? workout.name : 'Unknown',
                     extra: s.is_last ? "Final Rep" : `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}`,
                     recRaw: s.recovery_seconds,
                     isLast: s.is_last,
-                    index: s.index // Capture index for sorting
+                    index: s.index
                 });
             });
         });
-        // Sort by date THEN by index for correct intraday order
-        points.sort((a, b) => {
-            const dateA = new Date(a.x);
-            const dateB = new Date(b.x);
-            if (dateA < dateB) return -1;
-            if (dateA > dateB) return 1;
-            // Dates are equal, sort by series index
-            return (a.index || 0) - (b.index || 0);
-        });
-        
     } else {
-        // --- GYM CHART LOGIC ---
         const workoutName = param;
-        const targetWorkoutIds = data.workouts
-            .filter(w => w.type === 'gym' && w.name.trim() === workoutName)
-            .map(w => w.id);
-            
-        const relevantEntries = data.dayEntries
-            .filter(e => targetWorkoutIds.includes(e.workout_id))
-            .sort((a, b) => a.date.localeCompare(b.date));
+        const targetWorkouts = data.workouts.filter(w => w.type === 'gym' && w.name.trim() === workoutName);
+        const targetWorkoutIds = new Set(targetWorkouts.map(w => w.id));
 
-        relevantEntries.forEach(entry => {
+        data.dayEntries.forEach(entry => {
+            if (!targetWorkoutIds.has(entry.workout_id)) return;
+            const season = getSeasonForWorkout(entry.workout_id);
             const sets = data.seriesSets
                 .filter(s => s.day_entry_id === entry.id)
                 .sort((a, b) => a.index - b.index);
@@ -286,110 +439,312 @@ function updateChart(ctx, type, param) {
             sets.forEach(s => {
                 const w = parseFloat(s.weight);
                 if (!isNaN(w)) {
-                    points.push({
+                    rawPoints.push({
                         x: entry.date,
                         y: w,
+                        season: season,
                         workoutName: workoutName,
                         extra: `${s.reps} reps`, 
-                        repsRaw: s.reps 
+                        repsRaw: s.reps,
+                        index: s.index
                     });
                 }
             });
         });
     }
 
+    // Filter points by currently selected seasons
+    const filteredPoints = rawPoints.filter(p => selectedSeasons.has(p.season));
+
+    // Sort chronologically by date and intraday index
+    filteredPoints.sort((a, b) => {
+        const comp = a.x.localeCompare(b.x);
+        if (comp !== 0) return comp;
+        return (a.index || 0) - (b.index || 0);
+    });
+
+    // ===== Render Season Comparison Summary Cards =====
+    const comparisonGrid = document.getElementById('seasonComparisonGrid');
+    if (comparisonGrid) {
+        const sortedActiveSeasons = Array.from(selectedSeasons).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+        const seasonStatsMap = {};
+
+        sortedActiveSeasons.forEach(s => {
+            const sPoints = filteredPoints.filter(p => p.season === s);
+            if (sPoints.length > 0) {
+                const values = sPoints.map(p => p.y);
+                const best = type === 'track' ? Math.min(...values) : Math.max(...values);
+                const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+                seasonStatsMap[s] = {
+                    count: values.length,
+                    best: best,
+                    avg: avg,
+                    points: sPoints
+                };
+            } else {
+                seasonStatsMap[s] = { count: 0, best: null, avg: null, points: [] };
+            }
+        });
+
+        // Compute deltas between seasons if 2 or more exist
+        const cardsHTML = sortedActiveSeasons.map((s, idx) => {
+            const stats = seasonStatsMap[s];
+            const color = getSeasonColor(s, allSeasonsArray);
+            const unit = type === 'track' ? 's' : 'kg';
+
+            if (stats.count === 0) {
+                return `
+                    <div class="comparison-card" style="border-left: 4px solid ${color.line};">
+                        <div class="comparison-card-header">
+                            <span style="display:flex; align-items:center; gap:6px;">
+                                <span style="width:10px; height:10px; border-radius:50%; background:${color.line}; display:inline-block;"></span>
+                                <b>${s} Season</b>
+                            </span>
+                        </div>
+                        <div class="comparison-card-sub" style="margin-top:6px;">No entries logged for this parameter yet.</div>
+                    </div>
+                `;
+            }
+
+            // Compare with the next older season if available
+            let deltaHTML = '';
+            const nextSeason = sortedActiveSeasons[idx + 1];
+            if (nextSeason && seasonStatsMap[nextSeason] && seasonStatsMap[nextSeason].best !== null) {
+                const prevBest = seasonStatsMap[nextSeason].best;
+                const diff = stats.best - prevBest;
+                if (type === 'track') {
+                    // Lower time is faster
+                    if (diff < 0) {
+                        deltaHTML = `<div class="comparison-card-delta delta-positive">⚡ ${Math.abs(diff).toFixed(2)}s faster than ${nextSeason}</div>`;
+                    } else if (diff > 0) {
+                        deltaHTML = `<div class="comparison-card-delta delta-negative">+${diff.toFixed(2)}s vs ${nextSeason}</div>`;
+                    } else {
+                        deltaHTML = `<div class="comparison-card-delta delta-neutral">Matched ${nextSeason} PB</div>`;
+                    }
+                } else {
+                    // Higher weight is stronger
+                    if (diff > 0) {
+                        deltaHTML = `<div class="comparison-card-delta delta-positive">💪 +${diff.toFixed(1)}kg vs ${nextSeason}</div>`;
+                    } else if (diff < 0) {
+                        deltaHTML = `<div class="comparison-card-delta delta-negative">${diff.toFixed(1)}kg vs ${nextSeason}</div>`;
+                    } else {
+                        deltaHTML = `<div class="comparison-card-delta delta-neutral">Matched ${nextSeason} PB</div>`;
+                    }
+                }
+            }
+
+            return `
+                <div class="comparison-card highlight" style="border-left: 4px solid ${color.line};">
+                    <div class="comparison-card-header">
+                        <span style="display:flex; align-items:center; gap:6px;">
+                            <span style="width:10px; height:10px; border-radius:50%; background:${color.line}; display:inline-block;"></span>
+                            <b>${s} Season</b>
+                        </span>
+                        <span style="font-size:0.75rem; color:#aaa;">${stats.count} ${type === 'track' ? 'runs' : 'sets'}</span>
+                    </div>
+                    <div class="comparison-card-stat">
+                        ${stats.best.toFixed(2)}<span class="unit">${unit} PB</span>
+                    </div>
+                    <div class="comparison-card-sub">
+                        Average: <b>${stats.avg.toFixed(2)}${unit}</b>
+                    </div>
+                    ${deltaHTML}
+                </div>
+            `;
+        }).join('');
+
+        comparisonGrid.innerHTML = cardsHTML;
+    }
+
     if (myChart) myChart.destroy();
 
-    // Visuals based on Type
-    const label = type === 'track' 
-        ? `${param}m Performance (Seconds)` 
-        : `${param} History (kg)`;
-    
-    // Default base colors (used for line/fill, points will override)
-    const primaryColor = type === 'track' ? '#4caf50' : '#2196F3'; 
-    const bgColor = type === 'track' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(33, 150, 243, 0.2)';
-    
-    let pointColors = primaryColor;
     const legend = document.getElementById('chartLegend');
-    
-    if (legend) {
-        legend.style.display = 'flex';
-        // Generate Dynamic Legend content
-        if (type === 'track') {
-            pointColors = points.map(p => getRecoveryColor(p.recRaw, p.isLast));
-            legend.innerHTML = `
-                <div style="font-size:0.85rem; margin-bottom:5px;">Recovery Duration Scale</div>
-                <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
-                <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
-                    <span>Short (<1m)</span>
-                    <span>Medium</span>
-                    <span>Long (5m+)</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:0.8rem;">
-                    <span style="width:10px; height:10px; background:#E040FB; border-radius:50%; display:inline-block;"></span>
-                    <span>Final Rep (No Recovery)</span>
-                </div>
-            `;
+    const isMultiSeason = selectedSeasons.size > 1;
+
+    let chartLabels = [];
+    let datasets = [];
+
+    if (statsComparisonMode === 'timeline') {
+        chartLabels = filteredPoints.map(p => p.x);
+
+        if (!isMultiSeason) {
+            // Single season mode: preserve recovery/reps color scale
+            const singleSeason = Array.from(selectedSeasons)[0];
+            const color = getSeasonColor(singleSeason, allSeasonsArray);
+            let pointColors = color.line;
+
+            if (type === 'track') {
+                pointColors = filteredPoints.map(p => getRecoveryColor(p.recRaw, p.isLast));
+                if (legend) {
+                    legend.style.display = 'flex';
+                    legend.innerHTML = `
+                        <div style="font-size:0.85rem; margin-bottom:5px;">Recovery Duration Scale (${singleSeason} Season)</div>
+                        <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
+                        <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
+                            <span>Short (&lt;1m)</span>
+                            <span>Medium</span>
+                            <span>Long (5m+)</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:0.8rem;">
+                            <span style="width:10px; height:10px; background:#E040FB; border-radius:50%; display:inline-block;"></span>
+                            <span>Final Rep (No Recovery)</span>
+                        </div>
+                    `;
+                }
+            } else {
+                pointColors = filteredPoints.map(p => getRepColor(p.repsRaw));
+                if (legend) {
+                    legend.style.display = 'flex';
+                    legend.innerHTML = `
+                        <div style="font-size:0.85rem; margin-bottom:5px;">Reps Intensity Scale (${singleSeason} Season)</div>
+                        <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
+                        <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
+                            <span>1 (Max)</span>
+                            <span>6 (Str)</span>
+                            <span>12+ (End)</span>
+                        </div>
+                    `;
+                }
+            }
+
+            datasets.push({
+                label: `${singleSeason} Season (${param}${type === 'track' ? 'm' : ''})`,
+                data: filteredPoints.map(p => p.y),
+                borderColor: color.line,
+                backgroundColor: color.bg,
+                pointBackgroundColor: pointColors,
+                pointBorderColor: pointColors,
+                borderWidth: 2.5,
+                pointRadius: 6,
+                tension: 0.1,
+                showLine: true,
+                _rawPoints: filteredPoints
+            });
+
         } else {
-            pointColors = points.map(p => getRepColor(p.repsRaw));
-            legend.innerHTML = `
-                <div style="font-size:0.85rem; margin-bottom:5px;">Reps Intensity Scale</div>
-                <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
-                <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
-                    <span>1 (Max)</span>
-                    <span>6 (Str)</span>
-                    <span>12+ (End)</span>
-                </div>
-            `;
+            // Multi-season timeline comparison: each season gets a dedicated dataset with distinct line
+            if (legend) legend.style.display = 'none';
+
+            Array.from(selectedSeasons).sort().forEach(s => {
+                const color = getSeasonColor(s, allSeasonsArray);
+                const sPoints = filteredPoints.map(p => p.season === s ? p.y : null);
+                const count = filteredPoints.filter(p => p.season === s).length;
+                
+                datasets.push({
+                    label: `${s} Season (${count} pts)`,
+                    data: sPoints,
+                    borderColor: color.line,
+                    backgroundColor: color.bg,
+                    pointBackgroundColor: color.line,
+                    pointBorderColor: '#fff',
+                    pointHoverRadius: 8,
+                    pointRadius: 6,
+                    borderWidth: 2.5,
+                    tension: 0.1,
+                    showLine: true,
+                    spanGaps: true,
+                    _rawPoints: filteredPoints
+                });
+            });
         }
+
+    } else {
+        // ===== OVERLAY COMPARISON MODE =====
+        // Aligns seasons by Rep / Set progression index so progression curves overlay side-by-side
+        if (legend) legend.style.display = 'none';
+
+        const seasonsList = Array.from(selectedSeasons).sort();
+        let maxCount = 0;
+
+        const seasonPointsMap = {};
+        seasonsList.forEach(s => {
+            const sPoints = filteredPoints.filter(p => p.season === s);
+            seasonPointsMap[s] = sPoints;
+            if (sPoints.length > maxCount) maxCount = sPoints.length;
+        });
+
+        chartLabels = Array.from({ length: Math.max(maxCount, 1) }, (_, i) => `${type === 'track' ? 'Run' : 'Set'} #${i + 1}`);
+
+        seasonsList.forEach(s => {
+            const color = getSeasonColor(s, allSeasonsArray);
+            const sPoints = seasonPointsMap[s] || [];
+            
+            datasets.push({
+                label: `${s} Season (${sPoints.length} pts)`,
+                data: sPoints.map(p => p.y),
+                borderColor: color.line,
+                backgroundColor: color.bg,
+                pointBackgroundColor: color.line,
+                pointBorderColor: '#fff',
+                pointHoverRadius: 8,
+                pointRadius: 6,
+                borderWidth: 2.5,
+                tension: 0.1,
+                showLine: true,
+                _rawPoints: sPoints
+            });
+        });
     }
 
     myChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: points.map(p => p.x),
-            datasets: [{
-                label: label,
-                data: points.map(p => p.y),
-                borderColor: primaryColor,
-                backgroundColor: bgColor,
-                pointBackgroundColor: pointColors, 
-                pointBorderColor: pointColors,
-                borderWidth: 2,
-                pointRadius: 6,
-                tension: 0.1,
-                showLine: true 
-            }]
+            labels: chartLabels,
+            datasets: datasets
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                x: { 
-                    ticks: { color: '#bbb' }, 
-                    grid: { color: '#333' } 
-                },
-                y: { 
-                    ticks: { color: '#bbb' }, 
+                x: {
+                    ticks: { color: '#bbb' },
                     grid: { color: '#333' },
-                    title: { 
-                        display: true, 
-                        text: type === 'track' ? 'Time (s)' : 'Weight (kg)', 
-                        color: '#bbb' 
+                    title: {
+                        display: true,
+                        text: statsComparisonMode === 'timeline' ? 'Date' : `${type === 'track' ? 'Run' : 'Set'} Sequence (Overlay)`,
+                        color: '#bbb'
+                    }
+                },
+                y: {
+                    ticks: { color: '#bbb' },
+                    grid: { color: '#333' },
+                    title: {
+                        display: true,
+                        text: type === 'track' ? 'Time (seconds)' : 'Weight (kg)',
+                        color: '#bbb'
                     }
                 }
             },
             plugins: {
-                legend: { labels: { color: '#fff' } },
+                legend: {
+                    display: true,
+                    labels: {
+                        color: '#fff',
+                        font: { size: 12, weight: 'bold' }
+                    }
+                },
                 tooltip: {
                     callbacks: {
+                        title: function(items) {
+                            const item = items[0];
+                            return `${item.dataset.label} — ${item.label}`;
+                        },
+                        label: function(context) {
+                            const val = context.parsed.y;
+                            if (val === null || val === undefined) return '';
+                            const unit = type === 'track' ? 's' : 'kg';
+                            return ` ${type === 'track' ? 'Time' : 'Weight'}: ${val}${unit}`;
+                        },
                         afterLabel: function(context) {
-                            const p = points[context.dataIndex];
-                            // Show Workout Name on new line
-                            return [
-                                `Workout: ${p.workoutName}`,
-                                p.extra
-                            ];
+                            const raw = context.dataset._rawPoints?.[context.dataIndex];
+                            if (raw) {
+                                return [
+                                    `Date: ${raw.x}`,
+                                    `Workout: ${raw.workoutName}`,
+                                    raw.extra
+                                ];
+                            }
+                            return [];
                         }
                     }
                 }
@@ -398,11 +753,16 @@ function updateChart(ctx, type, param) {
     });
 }
 
-// ===== NEW FEATURE: Summary Page =====
+// ===== Summary Page (UPDATED: Season Filter) =====
 function renderSummary(main) {
+    const seasons = getAllSeasons();
     main.innerHTML = `
       <h2>Summary</h2>
       <div id="summaryFilters">
+        <select id="seasonFilter">
+          <option value="">All Seasons</option>
+          ${seasons.map(s => `<option value="${s}">Season ${s}</option>`).join('')}
+        </select>
         <select id="cycleFilter"><option value="">All Cycles</option></select>
         <select id="workoutFilter"><option value="">All Workouts</option></select>
         <input type="date" id="dateFilter">
@@ -416,26 +776,46 @@ function renderSummary(main) {
       <div id="summaryList"></div>
     `;
 
+    const seasonFilter = document.getElementById('seasonFilter');
     const cycleFilter = document.getElementById('cycleFilter');
     const workoutFilter = document.getElementById('workoutFilter');
     const dateFilter = document.getElementById('dateFilter');
     const typeFilter = document.getElementById('typeFilter');
     const clearFiltersBtn = document.getElementById('clearFiltersBtn');
 
-    // Populate cycle dropdown
-    const sortedCycles = data.cycles.sort((a,b) => b.start_date.localeCompare(a.start_date));
-    cycleFilter.innerHTML += sortedCycles.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    function updateCycleOptions() {
+        const selectedSeason = seasonFilter.value;
+        let availableCycles = data.cycles;
+        if (selectedSeason) {
+            availableCycles = data.cycles.filter(c => getCycleSeason(c) === selectedSeason);
+        }
+        const sorted = availableCycles.sort((a,b) => b.start_date.localeCompare(a.start_date));
+        cycleFilter.innerHTML = '<option value="">All Cycles</option>' + 
+            sorted.map(c => `<option value="${c.id}">${c.name} (${getCycleSeason(c)})</option>`).join('');
+    }
 
     function updateWorkoutOptions() {
+        const selectedSeason = seasonFilter.value;
         const selectedCycleId = cycleFilter.value;
         let availableWorkouts = data.workouts;
+
         if (selectedCycleId) {
             availableWorkouts = data.workouts.filter(w => w.cycle_id === selectedCycleId);
+        } else if (selectedSeason) {
+            const seasonCycleIds = new Set(data.cycles.filter(c => getCycleSeason(c) === selectedSeason).map(c => c.id));
+            availableWorkouts = data.workouts.filter(w => seasonCycleIds.has(w.cycle_id));
         }
+
         workoutFilter.innerHTML = '<option value="">All Workouts</option>' + 
             availableWorkouts.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
     }
     
+    seasonFilter.addEventListener('change', () => {
+        updateCycleOptions();
+        updateWorkoutOptions();
+        updateSummaryList();
+    });
+
     cycleFilter.addEventListener('change', () => {
         updateWorkoutOptions();
         updateSummaryList();
@@ -446,6 +826,8 @@ function renderSummary(main) {
     typeFilter.addEventListener('change', updateSummaryList);
 
     clearFiltersBtn.addEventListener('click', () => {
+        seasonFilter.value = '';
+        updateCycleOptions();
         cycleFilter.value = '';
         dateFilter.value = '';
         typeFilter.value = '';
@@ -454,6 +836,7 @@ function renderSummary(main) {
         updateSummaryList();
     });
 
+    updateCycleOptions();
     updateWorkoutOptions();
     updateSummaryList();
 }
@@ -462,18 +845,25 @@ function updateSummaryList() {
     const list = document.getElementById("summaryList");
     if (!list) return;
 
-    const selectedCycle = document.getElementById('cycleFilter').value;
-    const selectedWorkout = document.getElementById('workoutFilter').value;
-    const selectedDate = document.getElementById('dateFilter').value;
-    const selectedType = document.getElementById('typeFilter').value;
+    const selectedSeason = document.getElementById('seasonFilter')?.value;
+    const selectedCycle = document.getElementById('cycleFilter')?.value;
+    const selectedWorkout = document.getElementById('workoutFilter')?.value;
+    const selectedDate = document.getElementById('dateFilter')?.value;
+    const selectedType = document.getElementById('typeFilter')?.value;
 
     let filteredEntries = [...data.dayEntries];
 
-    // Apply filters
+    // Filter by season
+    if (selectedSeason) {
+        filteredEntries = filteredEntries.filter(d => getSeasonForWorkout(d.workout_id) === selectedSeason);
+    }
+
+    // Filter by date
     if (selectedDate) {
         filteredEntries = filteredEntries.filter(d => d.date === selectedDate);
     }
 
+    // Filter by workout or cycle
     if (selectedWorkout) {
         filteredEntries = filteredEntries.filter(d => d.workout_id === selectedWorkout);
     } else if (selectedCycle) {
@@ -481,6 +871,7 @@ function updateSummaryList() {
         filteredEntries = filteredEntries.filter(d => workoutIdsInCycle.includes(d.workout_id));
     }
     
+    // Filter by type
     if (selectedType) {
         filteredEntries = filteredEntries.filter(d => {
             const workout = data.workouts.find(w => w.id === d.workout_id);
@@ -493,10 +884,10 @@ function updateSummaryList() {
     list.innerHTML = sortedEntries.map(d => {
       const w = data.workouts.find(w => w.id === d.workout_id);
       const s = data.seriesSets.filter(s => s.day_entry_id === d.id).sort((a,b) => a.index - b.index);
+      const season = getSeasonForWorkout(d.workout_id);
 
       let seriesContent = s.map(ss => {
           if (ss.type === 'track') {
-              // NEW: Show Distance if available
               const dist = ss.distance_meters ? `<b>${ss.distance_meters}m</b> in ` : '';
               return `${dist}${ss.run_time}s` + (ss.is_last ? " (last)" : ` [rec: ${formatRecoveryForDisplay(ss.recovery_seconds)}]`);
           }
@@ -505,7 +896,11 @@ function updateSummaryList() {
 
       return `
         <div class="card">
-          <b>${w?.name || "Unknown"}</b> (${w?.type || 'N/A'}) — <b>${d.date}</b><br>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px; margin-bottom:4px;">
+            <span><b>${w?.name || "Unknown"}</b> (${w?.type || 'N/A'})</span>
+            <span class="season-badge">🏷️ Season: ${season}</span>
+          </div>
+          <div style="font-size:0.85rem; color:#bbb; margin-bottom:6px;">📅 ${d.date}</div>
           <p>${seriesContent}</p>
           ${d.notes ? `<i>${d.notes}</i><br>` : ''}
         </div>`;
@@ -514,13 +909,21 @@ function updateSummaryList() {
 
 // ===== Cycles (Refactored for Firebase) =====
 function renderCycles(main) {
+  const suggestedSeason = getSuggestedNewSeason();
+  const seasons = getAllSeasons();
   main.innerHTML = `
     <h2>Training Cycles</h2>
     <form id="cycleForm">
       <input name="name" placeholder="Cycle name (e.g. Pre-Season)" required>
+      <input name="season" id="cycleSeasonInput" list="seasonSuggestions" placeholder="Season (e.g. 2026 or 2027)" value="${suggestedSeason}" required>
       <input name="start" type="date" required>
       <input name="end" type="date" required>
       <button type="submit">Add Cycle</button>
+      <datalist id="seasonSuggestions">
+        ${seasons.map(s => `<option value="${s}">`).join('')}
+        <option value="2027">
+        <option value="2026">
+      </datalist>
     </form>
     <div id="cycleList"></div>
   `;
@@ -530,7 +933,8 @@ function renderCycles(main) {
     e.preventDefault();
     const f = e.target;
     const newCycle = {
-      name: f.name.value,
+      name: f.name.value.trim(),
+      season: f.season.value.trim() || '2027',
       start_date: f.start.value,
       end_date: f.end.value
     };
@@ -543,21 +947,37 @@ function updateCycleList() {
     const list = document.getElementById("cycleList");
     if(!list) return;
     const sortedCycles = data.cycles.sort((a,b) => b.start_date.localeCompare(a.start_date));
-    list.innerHTML = sortedCycles.map(c => `
-      <div class="card">
-        <b>${c.name}</b><br>${c.start_date} → ${c.end_date}<br>
-        <button onclick="editCycle('${c.id}')">✏️ Edit</button>
-        <button onclick="deleteCycle('${c.id}')">🗑️ Delete</button>
-      </div>
-    `).join("") || "<p>No cycles yet.</p>";
+    list.innerHTML = sortedCycles.map(c => {
+      const season = getCycleSeason(c);
+      return `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+            <b>${c.name}</b>
+            <span class="season-badge">🏷️ Season: ${season}</span>
+          </div>
+          <div style="margin-top:4px; font-size:0.9rem; color:#ccc;">${c.start_date} → ${c.end_date}</div>
+          <div style="margin-top:8px;">
+            <button onclick="editCycle('${c.id}')">✏️ Edit</button>
+            <button onclick="deleteCycle('${c.id}')">🗑️ Delete</button>
+          </div>
+        </div>
+      `;
+    }).join("") || "<p>No cycles yet.</p>";
 }
 
 window.editCycle = function(id) {
   const c = data.cycles.find(c => c.id === id);
   if (!c) return;
+  const seasons = getAllSeasons();
+  const currentSeason = c.season || getCycleSeason(c);
   const content = `
     <label>Cycle Name</label>
     <input id="editName" value="${c.name}">
+    <label>Season Tag</label>
+    <input id="editSeason" list="editSeasonSuggestions" value="${currentSeason}" placeholder="Season (e.g. 2026 or 2027)">
+    <datalist id="editSeasonSuggestions">
+      ${seasons.map(s => `<option value="${s}">`).join('')}
+    </datalist>
     <label>Start Date</label>
     <input id="editStart" type="date" value="${c.start_date}">
     <label>End Date</label>
@@ -565,7 +985,8 @@ window.editCycle = function(id) {
   `;
   openModal("Edit Cycle", content, "Save", () => {
     const updatedCycle = {
-      name: document.getElementById("editName").value,
+      name: document.getElementById("editName").value.trim(),
+      season: document.getElementById("editSeason").value.trim() || '2026',
       start_date: document.getElementById("editStart").value,
       end_date: document.getElementById("editEnd").value
     };
@@ -601,10 +1022,11 @@ function renderWorkouts(main) {
     main.innerHTML = "<h2>Workouts</h2><p>Please add a training cycle first.</p>";
     return;
   }
+  const sortedCycles = data.cycles.sort((a,b) => b.start_date.localeCompare(a.start_date));
   main.innerHTML = `
     <h2>Workouts</h2>
     <form id="workoutForm">
-      <select name="cycle">${data.cycles.map(c => `<option value="${c.id}">${c.name}</option>`).join("")}</select>
+      <select name="cycle">${sortedCycles.map(c => `<option value="${c.id}">${c.name} [Season ${getCycleSeason(c)}]</option>`).join("")}</select>
       <input name="name" placeholder="Workout name (e.g. 3x150m or Squats)" required>
       <select name="type"><option value="track">Track</option><option value="gym">Gym</option></select>
       <button type="submit">Add Workout</button>
@@ -631,9 +1053,18 @@ function updateWorkoutList() {
   if(!list) return;
   list.innerHTML = data.workouts.map(w => {
     const c = data.cycles.find(c => c.id === w.cycle_id);
-    return `<div class="card"><b>${w.name}</b> (${w.type})<br><i>${c?.name || "No Cycle"}</i><br>
-      <button onclick="editWorkout('${w.id}')">✏️ Edit</button>
-      <button onclick="deleteWorkout('${w.id}')">🗑️ Delete</button></div>`;
+    const season = getCycleSeason(c);
+    return `<div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+        <b>${w.name}</b> (${w.type})
+        <span class="season-badge" style="font-size:0.75rem;">Season: ${season}</span>
+      </div>
+      <i>Cycle: ${c?.name || "No Cycle"}</i><br>
+      <div style="margin-top:8px;">
+        <button onclick="editWorkout('${w.id}')">✏️ Edit</button>
+        <button onclick="deleteWorkout('${w.id}')">🗑️ Delete</button>
+      </div>
+    </div>`;
   }).join("") || "<p>No workouts yet.</p>";
 }
 
@@ -689,7 +1120,7 @@ function renderDayEntries(main) {
       <select id="dayCycleSelect">
         <option value="">1. Select Cycle...</option>
         ${data.cycles.sort((a,b) => b.start_date.localeCompare(a.start_date))
-          .map(c => `<option value="${c.id}">${c.name}</option>`).join("")}
+          .map(c => `<option value="${c.id}">[Season ${getCycleSeason(c)}] ${c.name}</option>`).join("")}
       </select>
       
       <select name="workout" id="dayWorkoutSelect" disabled required>
@@ -715,7 +1146,7 @@ function renderDayEntries(main) {
   const entryActions = document.getElementById("entryActions");
   let seriesCount = 0;
 
-  // NEW: Listener for Cycle Change
+  // Listener for Cycle Change
   cycleSelect.onchange = () => {
       const cycleId = cycleSelect.value;
       seriesContainer.innerHTML = "";
@@ -853,9 +1284,14 @@ function updateDayList() {
           typeMismatchWarning = `<div class="warning-text">Warning: Workout type is '${w.type}', but entries are for '${s[0].type}'. Please edit.</div>`;
       }
 
+      const season = getSeasonForWorkout(d.workout_id);
+
       return `
         <div class="card">
-          <b>${w?.name || "Unknown"}</b> — ${d.date}<br>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px; margin-bottom:4px;">
+            <b>${w?.name || "Unknown"}</b> — ${d.date}
+            <span class="season-badge">🏷️ Season: ${season}</span>
+          </div>
           <p>${seriesContent}</p>
           ${d.notes ? `<i>${d.notes}</i><br>` : ''}
           ${typeMismatchWarning}
