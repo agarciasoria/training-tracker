@@ -180,6 +180,7 @@ window.showSection = showSection; // BUG FIX: Expose showSection to window
 let myChart = null;
 let selectedSeasons = new Set();
 let statsComparisonMode = 'timeline'; // 'timeline' | 'overlay'
+let recoveryGradientEnabled = true; // Toggle for recovery gradient points in comparison & single graphs
 
 function renderStats(main) {
     const allSeasons = getAllSeasons();
@@ -219,11 +220,20 @@ function renderStats(main) {
                 </div>
             </div>
 
-            <div id="modeToggleSection" style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; padding-top: 8px; border-top: 1px solid #2d313b;">
-                <span style="font-size: 0.85rem; color: #aaa;">Comparison Mode:</span>
-                <div style="display: flex; background: #202229; border-radius: 6px; padding: 2px; gap: 2px;">
-                    <button type="button" id="modeTimelineBtn" class="mode-btn ${statsComparisonMode === 'timeline' ? 'active' : ''}">📅 Chronological Timeline</button>
-                    <button type="button" id="modeOverlayBtn" class="mode-btn ${statsComparisonMode === 'overlay' ? 'active' : ''}">🔄 Side-by-Side Progression</button>
+            <div id="modeToggleSection" style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 4px; padding-top: 8px; border-top: 1px solid #2d313b;">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <span style="font-size: 0.85rem; color: #aaa;">Comparison Mode:</span>
+                    <div style="display: flex; background: #202229; border-radius: 6px; padding: 2px; gap: 2px;">
+                        <button type="button" id="modeTimelineBtn" class="mode-btn ${statsComparisonMode === 'timeline' ? 'active' : ''}">📅 Chronological Timeline</button>
+                        <button type="button" id="modeOverlayBtn" class="mode-btn ${statsComparisonMode === 'overlay' ? 'active' : ''}">🔄 Side-by-Side Progression</button>
+                    </div>
+                </div>
+                
+                <div id="gradientToggleContainer" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" id="toggleRecoveryGradientBtn" class="mode-btn ${recoveryGradientEnabled ? 'active' : ''}" style="border: 1px solid ${recoveryGradientEnabled ? 'var(--accent)' : '#444'}; display: inline-flex; align-items: center; gap: 6px;">
+                        ⏱️ Recovery Gradients: <b style="color:${recoveryGradientEnabled ? 'var(--accent)' : '#aaa'};">${recoveryGradientEnabled ? 'ON' : 'OFF'}</b>
+                        <span style="font-size: 0.75rem; opacity: 0.85;">(&lt;3m / 3-8m / +8m)</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -248,6 +258,8 @@ function renderStats(main) {
     const ctx = document.getElementById('progressChart').getContext('2d');
     const modeTimelineBtn = document.getElementById('modeTimelineBtn');
     const modeOverlayBtn = document.getElementById('modeOverlayBtn');
+    const toggleRecoveryGradientBtn = document.getElementById('toggleRecoveryGradientBtn');
+    const gradientToggleContainer = document.getElementById('gradientToggleContainer');
 
     function renderSeasonPills() {
         const seasons = getAllSeasons();
@@ -262,7 +274,6 @@ function renderStats(main) {
             btn.innerHTML = `<span class="color-indicator" style="background:${color.line};"></span>${isActive ? '✓ ' : ''}${s} Season`;
             btn.onclick = () => {
                 if (selectedSeasons.has(s)) {
-                    // Prevent deselecting if it's the only one selected
                     if (selectedSeasons.size > 1) {
                         selectedSeasons.delete(s);
                     }
@@ -309,6 +320,19 @@ function renderStats(main) {
         triggerChartUpdate();
     };
 
+    if (toggleRecoveryGradientBtn) {
+        toggleRecoveryGradientBtn.onclick = () => {
+            recoveryGradientEnabled = !recoveryGradientEnabled;
+            toggleRecoveryGradientBtn.className = `mode-btn ${recoveryGradientEnabled ? 'active' : ''}`;
+            toggleRecoveryGradientBtn.style.border = `1px solid ${recoveryGradientEnabled ? 'var(--accent)' : '#444'}`;
+            toggleRecoveryGradientBtn.innerHTML = `
+                ⏱️ Recovery Gradients: <b style="color:${recoveryGradientEnabled ? 'var(--accent)' : '#aaa'};">${recoveryGradientEnabled ? 'ON' : 'OFF'}</b>
+                <span style="font-size: 0.75rem; opacity: 0.85;">(&lt;3m / 3-8m / +8m)</span>
+            `;
+            triggerChartUpdate();
+        };
+    }
+
     function triggerChartUpdate() {
         if (!statsParameter.value) return;
         updateChart(ctx, statsType.value, statsParameter.value);
@@ -319,6 +343,10 @@ function renderStats(main) {
         statsParameter.innerHTML = '<option value="">Select...</option>';
         statsParameter.disabled = false;
         warningContainer.innerHTML = '';
+
+        if (gradientToggleContainer) {
+            gradientToggleContainer.style.display = type === 'track' ? 'flex' : 'none';
+        }
 
         if (type === 'track') {
             const distances = new Set();
@@ -392,13 +420,37 @@ function getRepColor(repsString) {
 
 function getRecoveryColor(seconds, isLast) {
     if (isLast) return '#E040FB'; // Distinct Magenta for Final Rep
-    if (seconds == null) return '#888';
+    if (seconds == null || isNaN(seconds)) return '#888';
 
-    const minRec = 30;
-    const maxRec = 300; 
-    const clamped = Math.max(minRec, Math.min(seconds, maxRec));
-    const hue = ((clamped - minRec) / (maxRec - minRec)) * 120;
+    // Gradients rule:
+    // < 3 mins (< 180s): Short (Red to warm Amber/Orange, Hue 0° to ~40°)
+    // Between 3 and 8 mins (180s to 480s): Medium (Yellow to Lime-Green, Hue 50° to ~95°)
+    // +8 mins (>= 480s): Long (Pure Green, Hue 120°)
+    const shortSec = 180; // 3 min
+    const longSec = 480;  // 8 min
+
+    let hue = 0;
+    if (seconds < shortSec) {
+        // Red (0°) smoothly moving to Orange/Amber (~40°) at 179s
+        hue = (Math.max(0, seconds) / shortSec) * 40;
+    } else if (seconds <= longSec) {
+        // Yellow (50°) smoothly moving to Lime-Green (~95°) at 480s
+        const progress = (seconds - shortSec) / (longSec - shortSec);
+        hue = 50 + progress * 45;
+    } else {
+        // +8 mins is Long: Pure Green (120°)
+        hue = 120;
+    }
+
     return `hsl(${Math.round(hue)}, 100%, 45%)`;
+}
+
+function getRecoveryCategory(seconds, isLast) {
+    if (isLast) return 'Final Rep';
+    if (seconds == null || isNaN(seconds)) return 'No Recovery';
+    if (seconds < 180) return 'Short (<3m)';
+    if (seconds <= 480) return 'Medium (3-8m)';
+    return 'Long (+8m)';
 }
 
 function updateChart(ctx, type, param) {
@@ -412,12 +464,13 @@ function updateChart(ctx, type, param) {
             const sets = data.seriesSets.filter(s => s.day_entry_id === entry.id && s.distance_meters === distance);
             sets.forEach(s => {
                 const workout = data.workouts.find(w => w.id === entry.workout_id);
+                const recCat = s.is_last ? "Final Rep" : (s.recovery_seconds != null ? ` [${getRecoveryCategory(s.recovery_seconds, false)}]` : '');
                 rawPoints.push({
                     x: entry.date,
                     y: s.run_time,
                     season: season,
                     workoutName: workout ? workout.name : 'Unknown',
-                    extra: s.is_last ? "Final Rep" : `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}`,
+                    extra: s.is_last ? "Final Rep" : `Rec: ${formatRecoveryForDisplay(s.recovery_seconds)}${recCat}`,
                     recRaw: s.recovery_seconds,
                     isLast: s.is_last,
                     index: s.index
@@ -513,7 +566,6 @@ function updateChart(ctx, type, param) {
                 const prevBest = seasonStatsMap[nextSeason].best;
                 const diff = stats.best - prevBest;
                 if (type === 'track') {
-                    // Lower time is faster
                     if (diff < 0) {
                         deltaHTML = `<div class="comparison-card-delta delta-positive">⚡ ${Math.abs(diff).toFixed(2)}s faster than ${nextSeason}</div>`;
                     } else if (diff > 0) {
@@ -522,7 +574,6 @@ function updateChart(ctx, type, param) {
                         deltaHTML = `<div class="comparison-card-delta delta-neutral">Matched ${nextSeason} PB</div>`;
                     }
                 } else {
-                    // Higher weight is stronger
                     if (diff > 0) {
                         deltaHTML = `<div class="comparison-card-delta delta-positive">💪 +${diff.toFixed(1)}kg vs ${nextSeason}</div>`;
                     } else if (diff < 0) {
@@ -564,32 +615,39 @@ function updateChart(ctx, type, param) {
     let chartLabels = [];
     let datasets = [];
 
+    // Helper to render the recovery scale legend with the new thresholds
+    function renderRecoveryLegend() {
+        if (!legend) return;
+        legend.style.display = 'flex';
+        legend.innerHTML = `
+            <div style="font-size:0.85rem; margin-bottom:5px; font-weight:600; color:#fff;">Time Recovery Gradient Scale</div>
+            <div style="width:100%; max-width:340px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(40,100%,45%), hsl(70,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
+            <div style="display:flex; justify-content:space-between; width:100%; max-width:340px; font-size:0.75rem; margin-top:5px; color:#ddd;">
+                <span>🔴 Short (&lt; 3m)</span>
+                <span>🟡 Medium (3 - 8m)</span>
+                <span>🟢 Long (+8m)</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:0.8rem; color:#bbb;">
+                <span style="width:10px; height:10px; background:#E040FB; border-radius:50%; display:inline-block;"></span>
+                <span>Final Rep (No Recovery)</span>
+            </div>
+        `;
+    }
+
     if (statsComparisonMode === 'timeline') {
         chartLabels = filteredPoints.map(p => p.x);
 
         if (!isMultiSeason) {
-            // Single season mode: preserve recovery/reps color scale
             const singleSeason = Array.from(selectedSeasons)[0];
             const color = getSeasonColor(singleSeason, allSeasonsArray);
             let pointColors = color.line;
 
             if (type === 'track') {
-                pointColors = filteredPoints.map(p => getRecoveryColor(p.recRaw, p.isLast));
-                if (legend) {
-                    legend.style.display = 'flex';
-                    legend.innerHTML = `
-                        <div style="font-size:0.85rem; margin-bottom:5px;">Recovery Duration Scale (${singleSeason} Season)</div>
-                        <div style="width:100%; max-width:300px; height:12px; background:linear-gradient(to right, hsl(0,100%,45%), hsl(60,100%,45%), hsl(120,100%,45%)); border-radius:6px;"></div>
-                        <div style="display:flex; justify-content:space-between; width:100%; max-width:300px; font-size:0.75rem; margin-top:4px;">
-                            <span>Short (&lt;1m)</span>
-                            <span>Medium</span>
-                            <span>Long (5m+)</span>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:0.8rem;">
-                            <span style="width:10px; height:10px; background:#E040FB; border-radius:50%; display:inline-block;"></span>
-                            <span>Final Rep (No Recovery)</span>
-                        </div>
-                    `;
+                if (recoveryGradientEnabled) {
+                    pointColors = filteredPoints.map(p => getRecoveryColor(p.recRaw, p.isLast));
+                    renderRecoveryLegend();
+                } else {
+                    if (legend) legend.style.display = 'none';
                 }
             } else {
                 pointColors = filteredPoints.map(p => getRepColor(p.repsRaw));
@@ -613,30 +671,43 @@ function updateChart(ctx, type, param) {
                 borderColor: color.line,
                 backgroundColor: color.bg,
                 pointBackgroundColor: pointColors,
-                pointBorderColor: pointColors,
+                pointBorderColor: recoveryGradientEnabled && type === 'track' ? '#ffffff' : pointColors,
                 borderWidth: 2.5,
                 pointRadius: 6,
+                pointHoverRadius: 8,
                 tension: 0.1,
                 showLine: true,
                 _rawPoints: filteredPoints
             });
 
         } else {
-            // Multi-season timeline comparison: each season gets a dedicated dataset with distinct line
-            if (legend) legend.style.display = 'none';
+            // Multi-season timeline comparison
+            if (type === 'track' && recoveryGradientEnabled) {
+                renderRecoveryLegend();
+            } else {
+                if (legend) legend.style.display = 'none';
+            }
 
             Array.from(selectedSeasons).sort().forEach(s => {
                 const color = getSeasonColor(s, allSeasonsArray);
-                const sPoints = filteredPoints.map(p => p.season === s ? p.y : null);
+                const sData = filteredPoints.map(p => p.season === s ? p.y : null);
                 const count = filteredPoints.filter(p => p.season === s).length;
                 
+                let pointBgColors = color.line;
+                let pointBorderColors = '#fff';
+
+                if (type === 'track' && recoveryGradientEnabled) {
+                    pointBgColors = filteredPoints.map(p => p.season === s ? getRecoveryColor(p.recRaw, p.isLast) : '#888');
+                    pointBorderColors = '#ffffff';
+                }
+
                 datasets.push({
                     label: `${s} Season (${count} pts)`,
-                    data: sPoints,
+                    data: sData,
                     borderColor: color.line,
                     backgroundColor: color.bg,
-                    pointBackgroundColor: color.line,
-                    pointBorderColor: '#fff',
+                    pointBackgroundColor: pointBgColors,
+                    pointBorderColor: pointBorderColors,
                     pointHoverRadius: 8,
                     pointRadius: 6,
                     borderWidth: 2.5,
@@ -650,8 +721,11 @@ function updateChart(ctx, type, param) {
 
     } else {
         // ===== OVERLAY COMPARISON MODE =====
-        // Aligns seasons by Rep / Set progression index so progression curves overlay side-by-side
-        if (legend) legend.style.display = 'none';
+        if (type === 'track' && recoveryGradientEnabled) {
+            renderRecoveryLegend();
+        } else {
+            if (legend) legend.style.display = 'none';
+        }
 
         const seasonsList = Array.from(selectedSeasons).sort();
         let maxCount = 0;
@@ -668,14 +742,22 @@ function updateChart(ctx, type, param) {
         seasonsList.forEach(s => {
             const color = getSeasonColor(s, allSeasonsArray);
             const sPoints = seasonPointsMap[s] || [];
+
+            let pointBgColors = color.line;
+            let pointBorderColors = '#fff';
+
+            if (type === 'track' && recoveryGradientEnabled) {
+                pointBgColors = sPoints.map(p => getRecoveryColor(p.recRaw, p.isLast));
+                pointBorderColors = '#ffffff';
+            }
             
             datasets.push({
                 label: `${s} Season (${sPoints.length} pts)`,
                 data: sPoints.map(p => p.y),
                 borderColor: color.line,
                 backgroundColor: color.bg,
-                pointBackgroundColor: color.line,
-                pointBorderColor: '#fff',
+                pointBackgroundColor: pointBgColors,
+                pointBorderColor: pointBorderColors,
                 pointHoverRadius: 8,
                 pointRadius: 6,
                 borderWidth: 2.5,
